@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
-import { Bot, User, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Bot, User, ThumbsUp, ThumbsDown, Copy, Check } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
@@ -12,9 +13,21 @@ type Reaction = "up" | "down" | null;
 const ChatMessage = ({ role, content }: ChatMessageProps) => {
   const isUser = role === "user";
   const [reaction, setReaction] = useState<Reaction>(null);
+  const [copied, setCopied] = useState(false);
 
   const handleReaction = (type: "up" | "down") => {
     setReaction(prev => prev === type ? null : type);
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      toast.success("Copied to clipboard");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Failed to copy");
+    }
   };
 
   return (
@@ -45,6 +58,18 @@ const ChatMessage = ({ role, content }: ChatMessageProps) => {
         </div>
         {!isUser && (
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <button
+              onClick={handleCopy}
+              className={cn(
+                "p-1.5 rounded-md transition-all duration-200",
+                copied
+                  ? "bg-primary/20 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              )}
+              aria-label="Copy to clipboard"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
             <button
               onClick={() => handleReaction("up")}
               className={cn(
