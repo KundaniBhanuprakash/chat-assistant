@@ -15,10 +15,59 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+      throw new Error("Service configuration error");
     }
 
-    console.log("Sending request to Lovable AI Gateway with messages:", messages.length);
+    // Validate messages array
+    if (!Array.isArray(messages)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid messages format" }), 
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Limit number of messages in history
+    if (messages.length > 50) {
+      return new Response(
+        JSON.stringify({ error: "Too many messages in conversation" }), 
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate each message
+    for (const msg of messages) {
+      if (!msg.role || !msg.content) {
+        return new Response(
+          JSON.stringify({ error: "Invalid message format" }), 
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      if (typeof msg.content !== "string") {
+        return new Response(
+          JSON.stringify({ error: "Message content must be string" }), 
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      // Limit individual message size (10KB)
+      if (msg.content.length > 10000) {
+        return new Response(
+          JSON.stringify({ error: "Message too long (max 10000 characters)" }), 
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      // Validate role
+      if (!["user", "assistant", "system"].includes(msg.role)) {
+        return new Response(
+          JSON.stringify({ error: "Invalid message role" }), 
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    console.log("Processing chat request with", messages.length, "messages");
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -40,8 +89,7 @@ serve(async (req) => {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+      console.error("AI gateway error:", { status: response.status });
       
       if (response.status === 429) {
         return new Response(
@@ -57,20 +105,18 @@ serve(async (req) => {
       }
       
       return new Response(
-        JSON.stringify({ error: "Failed to get AI response" }), 
+        JSON.stringify({ error: "Unable to process request. Please try again later." }), 
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log("Streaming response from AI gateway");
-    
     return new Response(response.body, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (error) {
-    console.error("Chat function error:", error);
+    console.error("Chat function error:", { name: error instanceof Error ? error.name : "Unknown" });
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), 
+      JSON.stringify({ error: "An error occurred. Please try again." }), 
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

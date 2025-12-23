@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 
 interface Message {
@@ -8,12 +8,48 @@ interface Message {
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const MAX_MESSAGE_LENGTH = 10000;
+const MAX_HISTORY_MESSAGES = 20;
 
-export const useStreamingChat = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
+interface UseStreamingChatOptions {
+  conversationId: string | null;
+  onCreateConversation: (firstMessage: string) => Promise<string | null>;
+  onSaveMessage: (conversationId: string, role: "user" | "assistant", content: string) => Promise<string | null>;
+  initialMessages?: Message[];
+}
+
+export const useStreamingChat = ({
+  conversationId,
+  onCreateConversation,
+  onSaveMessage,
+  initialMessages = [],
+}: UseStreamingChatOptions) => {
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
 
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
+
   const sendMessage = useCallback(async (content: string) => {
+    // Validate message length
+    if (content.length > MAX_MESSAGE_LENGTH) {
+      toast.error(`Message too long. Please keep messages under ${MAX_MESSAGE_LENGTH.toLocaleString()} characters.`);
+      return;
+    }
+
+    if (!content.trim()) {
+      return;
+    }
+
+    let activeConversationId = conversationId;
+
+    // Create conversation if needed
+    if (!activeConversationId) {
+      activeConversationId = await onCreateConversation(content);
+      if (!activeConversationId) return;
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -22,6 +58,9 @@ export const useStreamingChat = () => {
 
     setMessages((prev) => [...prev, userMessage]);
     setIsStreaming(true);
+
+    // Save user message to database
+    await onSaveMessage(activeConversationId, "user", content);
 
     let assistantContent = "";
 
@@ -42,10 +81,10 @@ export const useStreamingChat = () => {
     };
 
     try {
-      const allMessages = [...messages, userMessage].map(({ role, content }) => ({
-        role,
-        content,
-      }));
+      // Limit conversation history to prevent unbounded growth
+      const conversationHistory = [...messages, userMessage]
+        .slice(-MAX_HISTORY_MESSAGES)
+        .map(({ role, content }) => ({ role, content }));
 
       const response = await fetch(CHAT_URL, {
         method: "POST",
@@ -53,7 +92,7 @@ export const useStreamingChat = () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: allMessages }),
+        body: JSON.stringify({ messages: conversationHistory }),
       });
 
       if (!response.ok) {
@@ -114,6 +153,11 @@ export const useStreamingChat = () => {
           }
         }
       }
+
+      // Save assistant message to database
+      if (assistantContent && activeConversationId) {
+        await onSaveMessage(activeConversationId, "assistant", assistantContent);
+      }
     } catch (error) {
       console.error("Chat error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to send message");
@@ -122,7 +166,7 @@ export const useStreamingChat = () => {
     } finally {
       setIsStreaming(false);
     }
-  }, [messages]);
+  }, [messages, conversationId, onCreateConversation, onSaveMessage]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
