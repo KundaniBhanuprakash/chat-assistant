@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Message {
   id: string;
@@ -81,6 +82,15 @@ export const useStreamingChat = ({
     };
 
     try {
+      // Get user's session token for authenticated request
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        toast.error("You must be logged in to use chat");
+        setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+        setIsStreaming(false);
+        return;
+      }
+
       // Limit conversation history to prevent unbounded growth
       const conversationHistory = [...messages, userMessage]
         .slice(-MAX_HISTORY_MESSAGES)
@@ -90,7 +100,7 @@ export const useStreamingChat = ({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ messages: conversationHistory }),
       });
