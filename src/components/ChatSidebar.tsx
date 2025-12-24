@@ -74,7 +74,7 @@ const ChatSidebar = ({
                     e.stopPropagation();
                     onDeleteConversation(conv.id);
                   }}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-destructive/20 rounded transition-all"
+                  className="p-1 hover:bg-destructive/20 rounded transition-all"
                 >
                   <Trash2 className="w-3 h-3 text-destructive" />
                 </button>
