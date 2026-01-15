@@ -6,8 +6,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Rate limit configuration (lowered for testing - change back to 20 for production)
-const RATE_LIMIT_MAX_REQUESTS = 3; // Max requests per window
+// Rate limit configuration
+const RATE_LIMIT_MAX_REQUESTS = 20; // Max requests per window
 const RATE_LIMIT_WINDOW_MINUTES = 1; // Time window in minutes
 
 serve(async (req) => {
