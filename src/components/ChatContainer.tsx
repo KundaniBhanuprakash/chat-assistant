@@ -4,6 +4,7 @@ import ChatInput from "./ChatInput";
 import TypingIndicator from "./TypingIndicator";
 import WelcomeScreen from "./WelcomeScreen";
 import ChatSidebar from "./ChatSidebar";
+import RateLimitBanner from "./RateLimitBanner";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useConversations } from "@/hooks/useConversations";
 import { useAuth } from "@/hooks/useAuth";
@@ -35,7 +36,7 @@ const ChatContainer = () => {
     startNewChat,
   } = useConversations(user?.id);
 
-  const { messages, isStreaming, sendMessage, clearMessages } = useStreamingChat({
+  const { messages, isStreaming, sendMessage, clearMessages, rateLimit } = useStreamingChat({
     conversationId: currentConversationId,
     onCreateConversation: createConversation,
     onSaveMessage: saveMessage,
@@ -144,9 +145,14 @@ const ChatContainer = () => {
           )}
         </main>
 
+        {/* Rate Limit Banner */}
+        {rateLimit.isLimited && (
+          <RateLimitBanner retryAfter={rateLimit.retryAfter} />
+        )}
+
         {/* Input Area */}
         <footer className="flex-shrink-0 p-4 border-t border-border/50">
-          <ChatInput onSend={sendMessage} disabled={isStreaming} />
+          <ChatInput onSend={sendMessage} disabled={isStreaming || rateLimit.isLimited} />
         </footer>
       </div>
     </div>
