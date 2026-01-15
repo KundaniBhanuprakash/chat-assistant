@@ -6,6 +6,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Rate limit configuration
+const RATE_LIMIT_MAX_REQUESTS = 20; // Max requests per window
+const RATE_LIMIT_WINDOW_MINUTES = 1; // Time window in minutes
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -39,6 +43,44 @@ serve(async (req) => {
     }
 
     console.log("Authenticated user:", user.id);
+
+    // Check rate limit using service role client
+    const serviceClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
+
+    const { data: isAllowed, error: rateLimitError } = await serviceClient.rpc(
+      "check_rate_limit",
+      {
+        p_user_id: user.id,
+        p_endpoint: "chat",
+        p_max_requests: RATE_LIMIT_MAX_REQUESTS,
+        p_window_minutes: RATE_LIMIT_WINDOW_MINUTES,
+      }
+    );
+
+    if (rateLimitError) {
+      console.error("Rate limit check error:", rateLimitError.message);
+    }
+
+    if (!isAllowed) {
+      console.log("Rate limit exceeded for user:", user.id);
+      return new Response(
+        JSON.stringify({ 
+          error: "Rate limit exceeded. Please wait a moment before sending more messages.",
+          retryAfter: RATE_LIMIT_WINDOW_MINUTES * 60
+        }),
+        { 
+          status: 429, 
+          headers: { 
+            ...corsHeaders, 
+            "Content-Type": "application/json",
+            "Retry-After": String(RATE_LIMIT_WINDOW_MINUTES * 60)
+          } 
+        }
+      );
+    }
 
     const { messages } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
