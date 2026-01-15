@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -6,6 +6,11 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+}
+
+interface RateLimitInfo {
+  isLimited: boolean;
+  retryAfter: number;
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
@@ -27,10 +32,36 @@ export const useStreamingChat = ({
 }: UseStreamingChatOptions) => {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [rateLimit, setRateLimit] = useState<RateLimitInfo>({ isLimited: false, retryAfter: 0 });
+  const rateLimitTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     setMessages(initialMessages);
   }, [initialMessages]);
+
+  // Countdown timer for rate limit
+  useEffect(() => {
+    if (rateLimit.retryAfter > 0) {
+      rateLimitTimerRef.current = setInterval(() => {
+        setRateLimit((prev) => {
+          const newRetryAfter = prev.retryAfter - 1;
+          if (newRetryAfter <= 0) {
+            if (rateLimitTimerRef.current) {
+              clearInterval(rateLimitTimerRef.current);
+            }
+            return { isLimited: false, retryAfter: 0 };
+          }
+          return { ...prev, retryAfter: newRetryAfter };
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (rateLimitTimerRef.current) {
+        clearInterval(rateLimitTimerRef.current);
+      }
+    };
+  }, [rateLimit.isLimited]);
 
   const sendMessage = useCallback(async (content: string) => {
     // Validate message length
@@ -106,6 +137,14 @@ export const useStreamingChat = ({
       });
 
       if (!response.ok) {
+        // Handle rate limiting
+        if (response.status === 429) {
+          const retryAfter = parseInt(response.headers.get("Retry-After") || "60", 10);
+          setRateLimit({ isLimited: true, retryAfter });
+          setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+          setIsStreaming(false);
+          return;
+        }
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || "Failed to get response");
       }
@@ -182,5 +221,5 @@ export const useStreamingChat = ({
     setMessages([]);
   }, []);
 
-  return { messages, isStreaming, sendMessage, clearMessages };
+  return { messages, isStreaming, sendMessage, clearMessages, rateLimit };
 };
