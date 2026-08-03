@@ -44,7 +44,7 @@ const Auth = () => {
 
     const { error } = isLogin
       ? await signIn(email, password)
-      : await signUp(email, password);
+      : await signUp(email, password, nextPath);
 
     if (error) {
       if (error.message.includes("User already registered")) {
