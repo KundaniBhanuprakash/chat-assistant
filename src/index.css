@@ -1,8 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @layer base {
   :root {
@@ -90,7 +90,7 @@
 
 @layer components {
   .message-bubble {
-    @apply px-4 py-3 rounded-2xl max-w-[85%] md:max-w-[75%];
+    @apply px-4 py-3 rounded-2xl max-w-[88%] sm:max-w-[85%] md:max-w-[75%] break-words;
   }
   
   .message-user {

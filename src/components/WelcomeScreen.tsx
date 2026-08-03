@@ -34,10 +34,10 @@ const WelcomeScreen = ({ onPromptClick }: WelcomeScreenProps) => {
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 mb-6">
           <Sparkles className="w-8 h-8 text-primary animate-pulse-glow" />
         </div>
-        <h1 className="text-3xl md:text-4xl font-semibold mb-3">
+        <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold mb-3">
           <span className="text-gradient">Hello!</span>{" "}
           <span className="text-foreground">How can I help?</span>
-        </h1>
+        </h2>
         <p className="text-muted-foreground text-base max-w-md mx-auto">
           I'm your AI assistant. Ask me anything and I'll do my best to help you.
         </p>
@@ -48,13 +48,13 @@ const WelcomeScreen = ({ onPromptClick }: WelcomeScreenProps) => {
           <button
             key={index}
             onClick={() => onPromptClick(item.prompt)}
-            className="group glass p-4 rounded-xl text-left transition-all duration-300 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
+            className="group glass p-4 min-h-14 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-all duration-300 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
           >
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-primary/10 text-primary group-hover:bg-primary/20 transition-colors">
                 <item.icon className="w-4 h-4" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-medium text-foreground">
                   {item.label}
                 </p>
