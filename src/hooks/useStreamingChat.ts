@@ -33,6 +33,7 @@ export const useStreamingChat = ({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo>({ isLimited: false, retryAfter: 0 });
+  const [failedMessage, setFailedMessage] = useState<string | null>(null);
   const rateLimitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -74,6 +75,7 @@ export const useStreamingChat = ({
       return;
     }
 
+    setFailedMessage(null);
     let activeConversationId = conversationId;
 
     // Create conversation if needed
@@ -141,12 +143,18 @@ export const useStreamingChat = ({
         if (response.status === 429) {
           const retryAfter = parseInt(response.headers.get("Retry-After") || "60", 10);
           setRateLimit({ isLimited: true, retryAfter });
+          setFailedMessage(content);
           setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
           setIsStreaming(false);
           return;
         }
+        if (response.status === 401) {
+          throw new Error("Your session expired. Please sign in again.");
+        }
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to get response");
+        throw new Error(
+          typeof errorData.error === "string" ? errorData.error : "Failed to get a response."
+        );
       }
 
       if (!response.body) {
@@ -209,7 +217,14 @@ export const useStreamingChat = ({
       }
     } catch (error) {
       console.error("Chat error:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to send message");
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      const message = offline
+        ? "You appear to be offline. Check your connection and retry."
+        : error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again.";
+      toast.error(message);
+      setFailedMessage(content);
       // Remove the user message if we failed
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
     } finally {
@@ -219,7 +234,20 @@ export const useStreamingChat = ({
 
   const clearMessages = useCallback(() => {
     setMessages([]);
+    setFailedMessage(null);
   }, []);
 
-  return { messages, isStreaming, sendMessage, clearMessages, rateLimit };
+  const retryLast = useCallback(() => {
+    if (failedMessage) void sendMessage(failedMessage);
+  }, [failedMessage, sendMessage]);
+
+  return {
+    messages,
+    isStreaming,
+    sendMessage,
+    clearMessages,
+    rateLimit,
+    retryLast,
+    canRetry: failedMessage !== null && !rateLimit.isLimited,
+  };
 };

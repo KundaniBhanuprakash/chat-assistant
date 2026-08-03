@@ -15,6 +15,9 @@ interface Conversation {
   updated_at: string;
 }
 
+// Only the most recent messages are loaded to keep long chats fast.
+const MESSAGE_PAGE_SIZE = 100;
+
 export const useConversations = (userId: string | undefined) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
@@ -27,10 +30,13 @@ export const useConversations = (userId: string | undefined) => {
     const { data, error } = await supabase
       .from("conversations")
       .select("*")
-      .order("updated_at", { ascending: false });
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(100);
 
     if (error) {
       console.error("Error fetching conversations:", error);
+      toast.error("Could not load your conversations.");
     } else {
       setConversations(data || []);
     }
@@ -70,14 +76,16 @@ export const useConversations = (userId: string | undefined) => {
       .from("messages")
       .select("*")
       .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE);
 
     if (error) {
       console.error("Error loading messages:", error);
+      toast.error("Could not load this conversation.");
       return [];
     }
 
-    return (data || []).map((msg) => ({
+    return (data || []).slice().reverse().map((msg) => ({
       id: msg.id,
       role: msg.role as "user" | "assistant",
       content: msg.content,
@@ -98,6 +106,7 @@ export const useConversations = (userId: string | undefined) => {
 
     if (error) {
       console.error("Error saving message:", error);
+      toast.error("Message could not be saved to your history.");
       return null;
     }
 
@@ -123,6 +132,7 @@ export const useConversations = (userId: string | undefined) => {
       return;
     }
 
+    toast.success("Conversation deleted");
     setConversations((prev) => prev.filter((c) => c.id !== conversationId));
     if (currentConversationId === conversationId) {
       setCurrentConversationId(null);
