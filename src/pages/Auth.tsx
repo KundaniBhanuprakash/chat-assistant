@@ -139,6 +139,21 @@ const Auth = () => {
             </div>
           </div>
 
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="remember"
+              checked={remember}
+              onCheckedChange={(checked) => setRemember(checked === true)}
+            />
+            <Label
+              htmlFor="remember"
+              className="text-sm font-normal text-muted-foreground cursor-pointer"
+            >
+              Keep me signed in on this device
+            </Label>
+          </div>
+
+
           <Button
             type="submit"
             className="w-full bg-primary hover:bg-primary/90"
