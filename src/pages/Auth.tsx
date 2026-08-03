@@ -13,9 +13,16 @@ const authSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
+const REMEMBERED_EMAIL_KEY = "remembered-email";
+
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(
+    () => localStorage.getItem(REMEMBERED_EMAIL_KEY) ?? ""
+  );
+  const [remember, setRemember] = useState(
+    () => !!localStorage.getItem(REMEMBERED_EMAIL_KEY)
+  );
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { user, loading, signIn, signUp } = useAuth();
@@ -30,6 +37,7 @@ const Auth = () => {
       navigate(nextPath);
     }
   }, [user, loading, navigate, nextPath]);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
