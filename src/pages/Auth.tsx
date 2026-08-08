@@ -22,9 +22,6 @@ const Auth = () => {
   const [email, setEmail] = useState(
     () => localStorage.getItem(REMEMBERED_EMAIL_KEY) ?? ""
   );
-  const [remember, setRemember] = useState(
-    () => !!localStorage.getItem(REMEMBERED_EMAIL_KEY)
-  );
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { user, loading, signIn, signUp } = useAuth();
