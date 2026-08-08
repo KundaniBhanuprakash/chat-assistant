@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+
 
 import { Sparkles, Mail, Lock, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,9 +21,6 @@ const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState(
     () => localStorage.getItem(REMEMBERED_EMAIL_KEY) ?? ""
-  );
-  const [remember, setRemember] = useState(
-    () => !!localStorage.getItem(REMEMBERED_EMAIL_KEY)
   );
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -65,11 +62,8 @@ const Auth = () => {
         toast.error(error.message);
       }
     } else {
-      if (remember) {
-        localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
-      } else {
-        localStorage.removeItem(REMEMBERED_EMAIL_KEY);
-      }
+      localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+
       if (!isLogin) {
         toast.success("Account created successfully!");
       }
@@ -141,19 +135,10 @@ const Auth = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="remember"
-              checked={remember}
-              onCheckedChange={(checked) => setRemember(checked === true)}
-            />
-            <Label
-              htmlFor="remember"
-              className="text-sm font-normal text-muted-foreground cursor-pointer"
-            >
-              Keep me signed in on this device
-            </Label>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            You'll stay signed in on this device.
+          </p>
+
 
 
           <Button
