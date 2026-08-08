@@ -62,11 +62,8 @@ const Auth = () => {
         toast.error(error.message);
       }
     } else {
-      if (remember) {
-        localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
-      } else {
-        localStorage.removeItem(REMEMBERED_EMAIL_KEY);
-      }
+      localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+
       if (!isLogin) {
         toast.success("Account created successfully!");
       }
