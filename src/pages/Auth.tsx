@@ -138,19 +138,10 @@ const Auth = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="remember"
-              checked={remember}
-              onCheckedChange={(checked) => setRemember(checked === true)}
-            />
-            <Label
-              htmlFor="remember"
-              className="text-sm font-normal text-muted-foreground cursor-pointer"
-            >
-              Keep me signed in on this device
-            </Label>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            You'll stay signed in on this device.
+          </p>
+
 
 
           <Button
