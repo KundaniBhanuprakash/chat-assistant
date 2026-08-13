@@ -29,7 +29,12 @@ export const useAuth = () => {
 
   const signUp = useCallback(async (email: string, password: string, redirectPath = "/") => {
     const safePath = redirectPath.startsWith("/") && !redirectPath.startsWith("//") ? redirectPath : "/";
-    const redirectUrl = `${window.location.origin}${safePath}`;
+    // Inside a Capacitor WebView the origin is capacitor://localhost / http://localhost,
+    // which is not a valid email-confirmation target. Fall back to the public web origin.
+    const origin = window.location.origin;
+    const isWebOrigin = /^https?:\/\//.test(origin) && !/^https?:\/\/localhost(:\d+)?$/.test(origin);
+    const baseUrl = isWebOrigin ? origin : "https://context-talk-agent.lovable.app";
+    const redirectUrl = `${baseUrl}${safePath}`;
     const { error } = await supabase.auth.signUp({
       email,
       password,
