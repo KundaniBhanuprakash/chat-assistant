@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Context Talk Agent</string>
+    <string name="title_activity_main">Context Talk Agent</string>
+    <string name="package_name">app.lovable.d0825e51a3d242d0b0b266bd4711c220</string>
+    <string name="custom_url_scheme">app.lovable.d0825e51a3d242d0b0b266bd4711c220</string>
+</resources>
