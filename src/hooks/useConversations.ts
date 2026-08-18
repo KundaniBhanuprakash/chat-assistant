@@ -119,7 +119,19 @@ export const useConversations = (userId: string | undefined) => {
     return data.id;
   }, []);
 
+  // Delete a single message
+  const deleteMessage = useCallback(async (messageId: string): Promise<boolean> => {
+    const { error } = await supabase.from("messages").delete().eq("id", messageId);
+    if (error) {
+      console.error("Error deleting message:", error);
+      toast.error("Failed to delete message");
+      return false;
+    }
+    return true;
+  }, []);
+
   // Delete a conversation
+
   const deleteConversation = useCallback(async (conversationId: string) => {
     const { error } = await supabase
       .from("conversations")

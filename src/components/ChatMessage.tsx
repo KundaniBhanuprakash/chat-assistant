@@ -1,35 +1,54 @@
 import { cn } from "@/lib/utils";
-import { Bot, User, ThumbsUp, ThumbsDown, Copy, Check } from "lucide-react";
+import { Bot, User, ThumbsUp, ThumbsDown, Copy, Check, Trash2 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
+import StoredImage from "./StoredImage";
+import { IMAGE_MARKER_REGEX } from "@/lib/chatImages";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
+  onDelete?: () => void;
 }
 
 type Reaction = "up" | "down" | null;
 
 type Block =
   | { type: "text"; value: string }
-  | { type: "code"; value: string; lang?: string };
+  | { type: "code"; value: string; lang?: string }
+  | { type: "image"; value: string };
 
-/** Split message content into plain-text and fenced code blocks (no extra deps). */
+/** Split content into image markers, plain text and fenced code blocks (no extra deps). */
 const parseBlocks = (content: string): Block[] => {
   const blocks: Block[] = [];
   const fence = /```([a-zA-Z0-9+#-]*)\n?([\s\S]*?)(?:```|$)/g;
   let last = 0;
   let match: RegExpExecArray | null;
-  while ((match = fence.exec(content)) !== null) {
-    if (match.index > last) {
-      blocks.push({ type: "text", value: content.slice(last, match.index) });
+
+  const pushText = (value: string) => {
+    const images = /\[\[image:([^\]]+)\]\]/g;
+    let cursor = 0;
+    let m: RegExpExecArray | null;
+    while ((m = images.exec(value)) !== null) {
+      if (m.index > cursor) blocks.push({ type: "text", value: value.slice(cursor, m.index) });
+      blocks.push({ type: "image", value: m[1] });
+      cursor = images.lastIndex;
     }
+    if (cursor < value.length) blocks.push({ type: "text", value: value.slice(cursor) });
+  };
+
+  while ((match = fence.exec(content)) !== null) {
+    if (match.index > last) pushText(content.slice(last, match.index));
     blocks.push({ type: "code", value: match[2] ?? "", lang: match[1] || undefined });
     last = fence.lastIndex;
   }
-  if (last < content.length) blocks.push({ type: "text", value: content.slice(last) });
-  return blocks.filter((b) => b.type === "code" || b.value.trim().length > 0);
+  if (last < content.length) pushText(content.slice(last));
+  return blocks.filter((b) => b.type !== "text" || b.value.trim().length > 0);
 };
+
+/** Text shown when copying: image markers are not useful on the clipboard. */
+const plainText = (content: string) => content.replace(IMAGE_MARKER_REGEX, "").trim();
+
 
 const copyText = async (text: string) => {
   try {
@@ -85,7 +104,7 @@ const CodeBlock = ({ value, lang }: { value: string; lang?: string }) => {
   );
 };
 
-const ChatMessage = ({ role, content }: ChatMessageProps) => {
+const ChatMessage = ({ role, content, onDelete }: ChatMessageProps) => {
   const isUser = role === "user";
   const [reaction, setReaction] = useState<Reaction>(null);
   const [copied, setCopied] = useState(false);
@@ -96,7 +115,8 @@ const ChatMessage = ({ role, content }: ChatMessageProps) => {
   };
 
   const handleCopy = async () => {
-    if (await copyText(content)) {
+    if (await copyText(plainText(content))) {
+
       setCopied(true);
       toast.success("Copied to clipboard");
       setTimeout(() => setCopied(false), 2000);
@@ -134,6 +154,12 @@ const ChatMessage = ({ role, content }: ChatMessageProps) => {
           {blocks.map((block, i) =>
             block.type === "code" ? (
               <CodeBlock key={i} value={block.value} lang={block.lang} />
+            ) : block.type === "image" ? (
+              <StoredImage
+                key={i}
+                path={block.value}
+                alt={isUser ? "Image you shared" : "Edited image"}
+              />
             ) : (
               <p
                 key={i}
@@ -144,48 +170,60 @@ const ChatMessage = ({ role, content }: ChatMessageProps) => {
             )
           )}
         </div>
-        {!isUser && (
-          <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity duration-200">
+        <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity duration-200">
+          {!isUser && (
+            <>
+              <button
+                onClick={handleCopy}
+                className={cn(
+                  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  copied
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                aria-label="Copy message to clipboard"
+              >
+                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+              <button
+                onClick={() => handleReaction("up")}
+                aria-pressed={reaction === "up"}
+                className={cn(
+                  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  reaction === "up"
+                    ? "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                aria-label="Mark response as helpful"
+              >
+                <ThumbsUp className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => handleReaction("down")}
+                aria-pressed={reaction === "down"}
+                className={cn(
+                  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  reaction === "down"
+                    ? "bg-destructive/20 text-destructive"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                aria-label="Mark response as not helpful"
+              >
+                <ThumbsDown className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+          {onDelete && (
             <button
-              onClick={handleCopy}
-              className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                copied
-                  ? "bg-primary/20 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              )}
-              aria-label="Copy message to clipboard"
+              onClick={onDelete}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-all duration-200 hover:bg-destructive/20 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Delete this message"
             >
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
-            <button
-              onClick={() => handleReaction("up")}
-              aria-pressed={reaction === "up"}
-              className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                reaction === "up"
-                  ? "bg-primary/20 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              )}
-              aria-label="Mark response as helpful"
-            >
-              <ThumbsUp className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => handleReaction("down")}
-              aria-pressed={reaction === "down"}
-              className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                reaction === "down"
-                  ? "bg-destructive/20 text-destructive"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              )}
-              aria-label="Mark response as not helpful"
-            >
-              <ThumbsDown className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
+          )}
+        </div>
+
       </div>
     </div>
   );
