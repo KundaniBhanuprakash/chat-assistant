@@ -1,35 +1,54 @@
 import { cn } from "@/lib/utils";
-import { Bot, User, ThumbsUp, ThumbsDown, Copy, Check } from "lucide-react";
+import { Bot, User, ThumbsUp, ThumbsDown, Copy, Check, Trash2 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
+import StoredImage from "./StoredImage";
+import { IMAGE_MARKER_REGEX } from "@/lib/chatImages";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
+  onDelete?: () => void;
 }
 
 type Reaction = "up" | "down" | null;
 
 type Block =
   | { type: "text"; value: string }
-  | { type: "code"; value: string; lang?: string };
+  | { type: "code"; value: string; lang?: string }
+  | { type: "image"; value: string };
 
-/** Split message content into plain-text and fenced code blocks (no extra deps). */
+/** Split content into image markers, plain text and fenced code blocks (no extra deps). */
 const parseBlocks = (content: string): Block[] => {
   const blocks: Block[] = [];
   const fence = /```([a-zA-Z0-9+#-]*)\n?([\s\S]*?)(?:```|$)/g;
   let last = 0;
   let match: RegExpExecArray | null;
-  while ((match = fence.exec(content)) !== null) {
-    if (match.index > last) {
-      blocks.push({ type: "text", value: content.slice(last, match.index) });
+
+  const pushText = (value: string) => {
+    const images = /\[\[image:([^\]]+)\]\]/g;
+    let cursor = 0;
+    let m: RegExpExecArray | null;
+    while ((m = images.exec(value)) !== null) {
+      if (m.index > cursor) blocks.push({ type: "text", value: value.slice(cursor, m.index) });
+      blocks.push({ type: "image", value: m[1] });
+      cursor = images.lastIndex;
     }
+    if (cursor < value.length) blocks.push({ type: "text", value: value.slice(cursor) });
+  };
+
+  while ((match = fence.exec(content)) !== null) {
+    if (match.index > last) pushText(content.slice(last, match.index));
     blocks.push({ type: "code", value: match[2] ?? "", lang: match[1] || undefined });
     last = fence.lastIndex;
   }
-  if (last < content.length) blocks.push({ type: "text", value: content.slice(last) });
-  return blocks.filter((b) => b.type === "code" || b.value.trim().length > 0);
+  if (last < content.length) pushText(content.slice(last));
+  return blocks.filter((b) => b.type !== "text" || b.value.trim().length > 0);
 };
+
+/** Text shown when copying: image markers are not useful on the clipboard. */
+const plainText = (content: string) => content.replace(IMAGE_MARKER_REGEX, "").trim();
+
 
 const copyText = async (text: string) => {
   try {
