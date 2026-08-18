@@ -104,7 +104,7 @@ const CodeBlock = ({ value, lang }: { value: string; lang?: string }) => {
   );
 };
 
-const ChatMessage = ({ role, content }: ChatMessageProps) => {
+const ChatMessage = ({ role, content, onDelete }: ChatMessageProps) => {
   const isUser = role === "user";
   const [reaction, setReaction] = useState<Reaction>(null);
   const [copied, setCopied] = useState(false);
@@ -115,7 +115,8 @@ const ChatMessage = ({ role, content }: ChatMessageProps) => {
   };
 
   const handleCopy = async () => {
-    if (await copyText(content)) {
+    if (await copyText(plainText(content))) {
+
       setCopied(true);
       toast.success("Copied to clipboard");
       setTimeout(() => setCopied(false), 2000);
