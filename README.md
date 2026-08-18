@@ -2,7 +2,7 @@
 
 ## Project info
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+**URL**: https://context-talk-agent.lovable.app/
 
 ## How can I edit this code?
 
@@ -10,7 +10,7 @@ There are several ways of editing your application.
 
 **Use Lovable**
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/d0825e51-a3d2-42d0-b0b2-66bd4711c220) and start prompting.
+Simply visit the [Lovable Project](https://context-talk-agent.lovable.app/) and start prompting.
 
 Changes made via Lovable will be committed automatically to this repo.
 
