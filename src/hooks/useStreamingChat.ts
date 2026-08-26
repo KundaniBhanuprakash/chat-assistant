@@ -200,7 +200,7 @@ export const useStreamingChat = ({
         }
         return [
           ...prev,
-          { id: (Date.now() + 1).toString(), role: "assistant", content: assistantContent },
+          { id: assistantLocalId, role: "assistant", content: assistantContent },
         ];
       });
     };
