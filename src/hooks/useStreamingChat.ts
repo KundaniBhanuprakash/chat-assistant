@@ -29,10 +29,13 @@ interface UseStreamingChatOptions {
 
 export const useStreamingChat = ({
   conversationId,
+  userId,
   onCreateConversation,
   onSaveMessage,
+  onDeleteMessage,
   initialMessages = [],
 }: UseStreamingChatOptions) => {
+
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo>({ isLimited: false, retryAfter: 0 });
