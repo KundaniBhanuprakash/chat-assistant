@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { imageMarker, uploadChatImage } from "@/lib/chatImages";
+
 
 interface Message {
   id: string;
