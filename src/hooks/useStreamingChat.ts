@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { imageMarker, uploadChatImage } from "@/lib/chatImages";
+
 
 interface Message {
   id: string;
@@ -19,17 +21,23 @@ const MAX_HISTORY_MESSAGES = 20;
 
 interface UseStreamingChatOptions {
   conversationId: string | null;
+  userId?: string;
   onCreateConversation: (firstMessage: string) => Promise<string | null>;
   onSaveMessage: (conversationId: string, role: "user" | "assistant", content: string) => Promise<string | null>;
+  onDeleteMessage?: (messageId: string) => Promise<boolean>;
   initialMessages?: Message[];
 }
 
+
 export const useStreamingChat = ({
   conversationId,
+  userId,
   onCreateConversation,
   onSaveMessage,
+  onDeleteMessage,
   initialMessages = [],
 }: UseStreamingChatOptions) => {
+
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo>({ isLimited: false, retryAfter: 0 });
@@ -64,10 +72,90 @@ export const useStreamingChat = ({
     };
   }, [rateLimit.isLimited]);
 
-  const sendMessage = useCallback(async (content: string) => {
+  // Persist a message and swap its temporary local id for the database id,
+  // so per-message delete can remove it from history too.
+  const persist = useCallback(
+    async (
+      conversationIdToUse: string,
+      role: "user" | "assistant",
+      content: string,
+      localId: string
+    ) => {
+      const savedId = await onSaveMessage(conversationIdToUse, role, content);
+      if (savedId) {
+        setMessages((prev) => prev.map((m) => (m.id === localId ? { ...m, id: savedId } : m)));
+      }
+    },
+    [onSaveMessage]
+  );
+
+  const sendImageEdit = useCallback(
+    async (prompt: string, image: File) => {
+      if (!userId) {
+        toast.error("You must be logged in to edit images");
+        return;
+      }
+
+      setFailedMessage(null);
+      let activeConversationId = conversationId;
+      if (!activeConversationId) {
+        activeConversationId = await onCreateConversation(prompt);
+        if (!activeConversationId) return;
+      }
+
+      setIsStreaming(true);
+      const localId = `local-${Date.now()}`;
+      try {
+        const path = await uploadChatImage(image, userId);
+        if (!path) {
+          toast.error("Could not upload the image. Please try again.");
+          return;
+        }
+
+        const userContent = `${imageMarker(path)}\n${prompt}`;
+        setMessages((prev) => [...prev, { id: localId, role: "user", content: userContent }]);
+        await persist(activeConversationId, "user", userContent, localId);
+
+        const { data, error } = await supabase.functions.invoke("image-edit", {
+          body: { prompt, path },
+        });
+
+        if (error || !data?.path) {
+          const message =
+            (data as { error?: string } | null)?.error ??
+            error?.message ??
+            "Unable to edit the image. Please try again.";
+          toast.error(message);
+          setFailedMessage(prompt);
+          return;
+        }
+
+        const assistantLocalId = `local-${Date.now() + 1}`;
+        const assistantContent = `${imageMarker(data.path as string)}\nHere's your edited image.`;
+        setMessages((prev) => [
+          ...prev,
+          { id: assistantLocalId, role: "assistant", content: assistantContent },
+        ]);
+        await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
+      } catch (err) {
+        console.error("Image edit error:", err);
+        toast.error("Something went wrong editing the image. Please try again.");
+      } finally {
+        setIsStreaming(false);
+      }
+    },
+    [conversationId, onCreateConversation, persist, userId]
+  );
+
+  const sendMessage = useCallback(async (content: string, image?: File) => {
     // Validate message length
     if (content.length > MAX_MESSAGE_LENGTH) {
       toast.error(`Message too long. Please keep messages under ${MAX_MESSAGE_LENGTH.toLocaleString()} characters.`);
+      return;
+    }
+
+    if (image) {
+      await sendImageEdit(content.trim(), image);
       return;
     }
 
@@ -85,7 +173,7 @@ export const useStreamingChat = ({
     }
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: `local-${Date.now()}`,
       role: "user",
       content,
     };
@@ -94,9 +182,12 @@ export const useStreamingChat = ({
     setIsStreaming(true);
 
     // Save user message to database
-    await onSaveMessage(activeConversationId, "user", content);
+    await persist(activeConversationId, "user", content, userMessage.id);
+
 
     let assistantContent = "";
+    const assistantLocalId = `local-${Date.now() + 1}`;
+
 
     const updateAssistant = (chunk: string) => {
       assistantContent += chunk;
@@ -109,7 +200,7 @@ export const useStreamingChat = ({
         }
         return [
           ...prev,
-          { id: (Date.now() + 1).toString(), role: "assistant", content: assistantContent },
+          { id: assistantLocalId, role: "assistant", content: assistantContent },
         ];
       });
     };
@@ -213,8 +304,9 @@ export const useStreamingChat = ({
 
       // Save assistant message to database
       if (assistantContent && activeConversationId) {
-        await onSaveMessage(activeConversationId, "assistant", assistantContent);
+        await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
       }
+
     } catch (error) {
       console.error("Chat error:", error);
       const offline = typeof navigator !== "undefined" && navigator.onLine === false;
@@ -230,12 +322,25 @@ export const useStreamingChat = ({
     } finally {
       setIsStreaming(false);
     }
-  }, [messages, conversationId, onCreateConversation, onSaveMessage]);
+  }, [messages, conversationId, onCreateConversation, persist, sendImageEdit]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
     setFailedMessage(null);
   }, []);
+
+  const deleteMessage = useCallback(
+    async (messageId: string) => {
+      // Locally-created messages have no database row yet.
+      if (!messageId.startsWith("local-") && onDeleteMessage) {
+        const ok = await onDeleteMessage(messageId);
+        if (!ok) return;
+      }
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      toast.success("Message deleted");
+    },
+    [onDeleteMessage]
+  );
 
   const retryLast = useCallback(() => {
     if (failedMessage) void sendMessage(failedMessage);
@@ -245,6 +350,8 @@ export const useStreamingChat = ({
     messages,
     isStreaming,
     sendMessage,
+    deleteMessage,
+
     clearMessages,
     rateLimit,
     retryLast,

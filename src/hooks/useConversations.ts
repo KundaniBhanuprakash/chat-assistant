@@ -167,6 +167,8 @@ export const useConversations = (userId: string | undefined) => {
     loadMessages,
     saveMessage,
     deleteConversation,
+    deleteMessage,
+
     selectConversation,
     startNewChat,
     refreshConversations: fetchConversations,
