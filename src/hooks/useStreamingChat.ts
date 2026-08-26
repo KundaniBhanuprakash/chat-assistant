@@ -304,8 +304,9 @@ export const useStreamingChat = ({
 
       // Save assistant message to database
       if (assistantContent && activeConversationId) {
-        await onSaveMessage(activeConversationId, "assistant", assistantContent);
+        await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
       }
+
     } catch (error) {
       console.error("Chat error:", error);
       const offline = typeof navigator !== "undefined" && navigator.onLine === false;
