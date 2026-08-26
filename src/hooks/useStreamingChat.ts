@@ -186,6 +186,8 @@ export const useStreamingChat = ({
 
 
     let assistantContent = "";
+    const assistantLocalId = `local-${Date.now() + 1}`;
+
 
     const updateAssistant = (chunk: string) => {
       assistantContent += chunk;
