@@ -322,12 +322,25 @@ export const useStreamingChat = ({
     } finally {
       setIsStreaming(false);
     }
-  }, [messages, conversationId, onCreateConversation, onSaveMessage]);
+  }, [messages, conversationId, onCreateConversation, persist, sendImageEdit]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
     setFailedMessage(null);
   }, []);
+
+  const deleteMessage = useCallback(
+    async (messageId: string) => {
+      // Locally-created messages have no database row yet.
+      if (!messageId.startsWith("local-") && onDeleteMessage) {
+        const ok = await onDeleteMessage(messageId);
+        if (!ok) return;
+      }
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      toast.success("Message deleted");
+    },
+    [onDeleteMessage]
+  );
 
   const retryLast = useCallback(() => {
     if (failedMessage) void sendMessage(failedMessage);
@@ -337,6 +350,8 @@ export const useStreamingChat = ({
     messages,
     isStreaming,
     sendMessage,
+    deleteMessage,
+
     clearMessages,
     rateLimit,
     retryLast,
