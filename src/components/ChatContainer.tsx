@@ -32,17 +32,29 @@ const ChatContainer = () => {
     loadMessages,
     saveMessage,
     deleteConversation,
+    deleteMessage: deleteMessageRow,
     selectConversation,
     startNewChat,
   } = useConversations(user?.id);
 
-  const { messages, isStreaming, sendMessage, clearMessages, rateLimit, retryLast, canRetry } =
-    useStreamingChat({
-      conversationId: currentConversationId,
-      onCreateConversation: createConversation,
-      onSaveMessage: saveMessage,
-      initialMessages: loadedMessages,
-    });
+  const {
+    messages,
+    isStreaming,
+    sendMessage,
+    deleteMessage,
+    clearMessages,
+    rateLimit,
+    retryLast,
+    canRetry,
+  } = useStreamingChat({
+    conversationId: currentConversationId,
+    userId: user?.id,
+    onCreateConversation: createConversation,
+    onSaveMessage: saveMessage,
+    onDeleteMessage: deleteMessageRow,
+    initialMessages: loadedMessages,
+  });
+
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
