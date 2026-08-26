@@ -57,9 +57,12 @@ const ChatContainer = () => {
 
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLElement>(null);
 
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
 
   useEffect(() => {
@@ -112,7 +115,7 @@ const ChatContainer = () => {
   };
 
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div className="flex h-full min-h-0 overflow-hidden">
       {/* Sidebar */}
       {sidebarOpen && (
         <>
@@ -123,7 +126,7 @@ const ChatContainer = () => {
               aria-hidden="true"
             />
           )}
-          <div className={isMobile ? "fixed left-0 top-0 z-50" : ""}>
+          <div className={isMobile ? "fixed left-0 top-0 h-dvh z-50" : "h-full"}>
             <ChatSidebar
               conversations={conversations}
               currentConversationId={currentConversationId}
@@ -139,7 +142,7 @@ const ChatContainer = () => {
       )}
 
       {/* Main Chat Area */}
-      <div className="flex-1 min-w-0 flex flex-col h-dvh max-w-4xl mx-auto w-full">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col h-full max-w-4xl mx-auto w-full">
         {/* Header */}
         <header className="flex-shrink-0 py-3 px-3 sm:px-4 border-b border-border/50 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <div className="flex items-center gap-3">
@@ -160,7 +163,8 @@ const ChatContainer = () => {
 
         {/* Messages Area */}
         <main
-          className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 sm:px-4 py-6"
+          ref={messagesContainerRef}
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-3 sm:px-4 py-6"
           aria-live="polite"
           aria-busy={isStreaming}
         >
