@@ -19,10 +19,13 @@ const MAX_HISTORY_MESSAGES = 20;
 
 interface UseStreamingChatOptions {
   conversationId: string | null;
+  userId?: string;
   onCreateConversation: (firstMessage: string) => Promise<string | null>;
   onSaveMessage: (conversationId: string, role: "user" | "assistant", content: string) => Promise<string | null>;
+  onDeleteMessage?: (messageId: string) => Promise<boolean>;
   initialMessages?: Message[];
 }
+
 
 export const useStreamingChat = ({
   conversationId,
