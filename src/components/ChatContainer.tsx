@@ -169,8 +169,14 @@ const ChatContainer = () => {
           ) : (
             <div className="space-y-6">
               {messages.map((message) => (
-                <ChatMessage key={message.id} role={message.role} content={message.content} />
+                <ChatMessage
+                  key={message.id}
+                  role={message.role}
+                  content={message.content}
+                  onDelete={() => void deleteMessage(message.id)}
+                />
               ))}
+
               {isStreaming && <TypingIndicator />}
               {canRetry && !isStreaming && (
                 <div className="flex justify-center">
