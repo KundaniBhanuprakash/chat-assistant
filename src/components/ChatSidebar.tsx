@@ -47,7 +47,7 @@ const ChatSidebar = ({
   return (
     <nav
       aria-label="Conversations"
-      className="w-[min(16rem,85vw)] h-dvh flex flex-col bg-sidebar border-r border-sidebar-border pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+      className="w-[min(16rem,85vw)] h-full min-h-0 flex flex-col bg-sidebar border-r border-sidebar-border pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
       {/* Header */}
       <div className="p-4 border-b border-sidebar-border">
