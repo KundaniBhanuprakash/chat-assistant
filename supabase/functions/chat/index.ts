@@ -1,14 +1,24 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildSystemPrompt, isChatMode, resolveModel } from "../_shared/models.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Expose-Headers": "X-Context-Talk-Mode",
 };
 
-// Rate limit configuration
-const RATE_LIMIT_MAX_REQUESTS = 20; // Max requests per window
-const RATE_LIMIT_WINDOW_MINUTES = 1; // Time window in minutes
+const RATE_LIMIT_MAX_REQUESTS = 20;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
+const MAX_MESSAGES = 50;
+const MAX_MESSAGE_CHARS = 10000;
+const MAX_INSTRUCTIONS_CHARS = 2000;
+
+const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json", ...extra },
+  });
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -16,17 +26,9 @@ serve(async (req) => {
   }
 
   try {
-    // Verify authentication
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      console.error("Missing authorization header");
-      return new Response(
-        JSON.stringify({ error: "Authentication required" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    if (!authHeader) return json({ error: "Authentication required" }, 401);
 
-    // Create Supabase client and verify user
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_ANON_KEY") ?? "",
@@ -34,111 +36,74 @@ serve(async (req) => {
     );
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
-    if (authError || !user) {
-      console.error("Authentication failed:", authError?.message);
-      return new Response(
-        JSON.stringify({ error: "Invalid authentication" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    if (authError || !user) return json({ error: "Invalid authentication" }, 401);
 
-    console.log("Authenticated user:", user.id);
-
-    // Check rate limit using service role client
     const serviceClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    const { data: isAllowed, error: rateLimitError } = await serviceClient.rpc(
-      "check_rate_limit",
-      {
-        p_user_id: user.id,
-        p_endpoint: "chat",
-        p_max_requests: RATE_LIMIT_MAX_REQUESTS,
-        p_window_minutes: RATE_LIMIT_WINDOW_MINUTES,
-      }
-    );
+    const { data: isAllowed, error: rateLimitError } = await serviceClient.rpc("check_rate_limit", {
+      p_user_id: user.id,
+      p_endpoint: "chat",
+      p_max_requests: RATE_LIMIT_MAX_REQUESTS,
+      p_window_minutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
 
-    if (rateLimitError) {
-      console.error("Rate limit check error:", rateLimitError.message);
-    }
+    if (rateLimitError) console.error("Rate limit check error:", rateLimitError.message);
 
     if (!isAllowed) {
-      console.log("Rate limit exceeded for user:", user.id);
-      return new Response(
-        JSON.stringify({ 
+      return json(
+        {
           error: "Rate limit exceeded. Please wait a moment before sending more messages.",
-          retryAfter: RATE_LIMIT_WINDOW_MINUTES * 60
-        }),
-        { 
-          status: 429, 
-          headers: { 
-            ...corsHeaders, 
-            "Content-Type": "application/json",
-            "Retry-After": String(RATE_LIMIT_WINDOW_MINUTES * 60)
-          } 
-        }
+          retryAfter: RATE_LIMIT_WINDOW_MINUTES * 60,
+        },
+        429,
+        { "Retry-After": String(RATE_LIMIT_WINDOW_MINUTES * 60) }
       );
     }
 
-    const { messages } = await req.json();
+    const body = await req.json().catch(() => null);
+    const messages = body?.messages;
+    const requestedMode = isChatMode(body?.mode) ? body.mode : "auto";
+    const customInstructions =
+      typeof body?.instructions === "string"
+        ? body.instructions.slice(0, MAX_INSTRUCTIONS_CHARS)
+        : undefined;
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    
-    if (!LOVABLE_API_KEY) {
-      throw new Error("Service configuration error");
+    if (!LOVABLE_API_KEY) return json({ error: "AI service is not configured." }, 503);
+
+    if (!Array.isArray(messages)) return json({ error: "Invalid messages format" }, 400);
+    if (messages.length === 0) return json({ error: "No messages provided" }, 400);
+    if (messages.length > MAX_MESSAGES) {
+      return json({ error: "Too many messages in conversation" }, 400);
     }
 
-    // Validate messages array
-    if (!Array.isArray(messages)) {
-      return new Response(
-        JSON.stringify({ error: "Invalid messages format" }), 
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Limit number of messages in history
-    if (messages.length > 50) {
-      return new Response(
-        JSON.stringify({ error: "Too many messages in conversation" }), 
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Validate each message
     for (const msg of messages) {
-      if (!msg.role || !msg.content) {
-        return new Response(
-          JSON.stringify({ error: "Invalid message format" }), 
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (!msg?.role || typeof msg.content !== "string" || !msg.content) {
+        return json({ error: "Invalid message format" }, 400);
       }
-      
-      if (typeof msg.content !== "string") {
-        return new Response(
-          JSON.stringify({ error: "Message content must be string" }), 
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      if (msg.content.length > MAX_MESSAGE_CHARS) {
+        return json({ error: `Message too long (max ${MAX_MESSAGE_CHARS} characters)` }, 400);
       }
-      
-      // Limit individual message size (10KB)
-      if (msg.content.length > 10000) {
-        return new Response(
-          JSON.stringify({ error: "Message too long (max 10000 characters)" }), 
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      
-      // Validate role
       if (!["user", "assistant", "system"].includes(msg.role)) {
-        return new Response(
-          JSON.stringify({ error: "Invalid message role" }), 
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return json({ error: "Invalid message role" }, 400);
       }
     }
 
-    console.log("Processing chat request for user", user.id, "with", messages.length, "messages");
+    // Drop any client-supplied system messages: the system prompt is server-owned
+    // so a user cannot overwrite the assistant's instructions via the request body.
+    const history = messages.filter((m: { role: string }) => m.role !== "system");
+    const lastUser = [...history].reverse().find((m: { role: string }) => m.role === "user");
+
+    const { mode, resolved } = resolveModel(
+      requestedMode,
+      typeof lastUser?.content === "string" ? lastUser.content : "",
+      false
+    );
+
+    console.log("chat request", { user: user.id, requestedMode, mode, model: resolved.model });
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -147,48 +112,52 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: resolved.model,
         messages: [
-          { 
-            role: "system", 
-            content: "You are a helpful, friendly AI assistant. Provide clear, concise, and accurate responses. Be conversational but professional." 
-          },
-          ...messages,
+          { role: "system", content: buildSystemPrompt(resolved, customInstructions) },
+          ...history,
         ],
+        ...(resolved.temperature !== undefined ? { temperature: resolved.temperature } : {}),
         stream: true,
       }),
+      signal: req.signal,
     });
 
     if (!response.ok) {
-      console.error("AI gateway error:", { status: response.status });
-      
+      const detail = await response.text().catch(() => "");
+      console.error("AI gateway error:", { status: response.status, detail: detail.slice(0, 300) });
+
       if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), 
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return json({ error: "The AI service is busy. Please try again in a moment." }, 429, {
+          "Retry-After": response.headers.get("Retry-After") ?? "30",
+        });
       }
       if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "Usage limit reached. Please add credits to continue." }), 
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return json({ error: "AI usage limit reached. Please add credits to continue." }, 402);
       }
-      
-      return new Response(
-        JSON.stringify({ error: "Unable to process request. Please try again later." }), 
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (response.status === 403) {
+        return json({ error: "AI access is currently blocked for this workspace." }, 403);
+      }
+      if (response.status === 400) {
+        return json({ error: "That request could not be processed by the selected model." }, 400);
+      }
+      return json({ error: "Unable to reach the AI service. Please try again." }, 502);
     }
 
     return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "text/event-stream",
+        "X-Context-Talk-Mode": mode,
+      },
     });
   } catch (error) {
-    console.error("Chat function error:", { name: error instanceof Error ? error.name : "Unknown" });
-    return new Response(
-      JSON.stringify({ error: "An error occurred. Please try again." }), 
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    if (error instanceof Error && error.name === "AbortError") {
+      return new Response(null, { status: 499, headers: corsHeaders });
+    }
+    console.error("Chat function error:", {
+      name: error instanceof Error ? error.name : "Unknown",
+    });
+    return json({ error: "An error occurred. Please try again." }, 500);
   }
 });
