@@ -2,12 +2,13 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { imageMarker, uploadChatImage } from "@/lib/chatImages";
+import type { ChatMode } from "@/lib/models";
 
-
-interface Message {
+export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt?: string;
 }
 
 interface RateLimitInfo {
@@ -22,30 +23,44 @@ const MAX_HISTORY_MESSAGES = 20;
 interface UseStreamingChatOptions {
   conversationId: string | null;
   userId?: string;
+  mode: ChatMode;
+  instructions?: string;
   onCreateConversation: (firstMessage: string) => Promise<string | null>;
-  onSaveMessage: (conversationId: string, role: "user" | "assistant", content: string) => Promise<string | null>;
+  onSaveMessage: (
+    conversationId: string,
+    role: "user" | "assistant",
+    content: string
+  ) => Promise<string | null>;
   onDeleteMessage?: (messageId: string) => Promise<boolean>;
   initialMessages?: Message[];
 }
 
-
 export const useStreamingChat = ({
   conversationId,
   userId,
+  mode,
+  instructions,
   onCreateConversation,
   onSaveMessage,
   onDeleteMessage,
   initialMessages = [],
 }: UseStreamingChatOptions) => {
-
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo>({ isLimited: false, retryAfter: 0 });
   const [failedMessage, setFailedMessage] = useState<string | null>(null);
   const rateLimitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  // Latest messages, so callbacks can read history without re-creating themselves.
+  const messagesRef = useRef<Message[]>(initialMessages);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     setMessages(initialMessages);
+    messagesRef.current = initialMessages;
   }, [initialMessages]);
 
   // Countdown timer for rate limit
@@ -53,27 +68,24 @@ export const useStreamingChat = ({
     if (rateLimit.retryAfter > 0) {
       rateLimitTimerRef.current = setInterval(() => {
         setRateLimit((prev) => {
-          const newRetryAfter = prev.retryAfter - 1;
-          if (newRetryAfter <= 0) {
-            if (rateLimitTimerRef.current) {
-              clearInterval(rateLimitTimerRef.current);
-            }
+          const next = prev.retryAfter - 1;
+          if (next <= 0) {
+            if (rateLimitTimerRef.current) clearInterval(rateLimitTimerRef.current);
             return { isLimited: false, retryAfter: 0 };
           }
-          return { ...prev, retryAfter: newRetryAfter };
+          return { ...prev, retryAfter: next };
         });
       }, 1000);
     }
-
     return () => {
-      if (rateLimitTimerRef.current) {
-        clearInterval(rateLimitTimerRef.current);
-      }
+      if (rateLimitTimerRef.current) clearInterval(rateLimitTimerRef.current);
     };
   }, [rateLimit.isLimited]);
 
-  // Persist a message and swap its temporary local id for the database id,
-  // so per-message delete can remove it from history too.
+  // Abort any in-flight stream when the component unmounts.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  /** Persist a message and swap its temporary local id for the database id. */
   const persist = useCallback(
     async (
       conversationIdToUse: string,
@@ -90,14 +102,14 @@ export const useStreamingChat = ({
   );
 
   const sendImageEdit = useCallback(
-    async (prompt: string, image: File) => {
+    async (prompt: string, image: File, targetConversationId?: string) => {
       if (!userId) {
         toast.error("You must be logged in to edit images");
         return;
       }
 
       setFailedMessage(null);
-      let activeConversationId = conversationId;
+      let activeConversationId = targetConversationId ?? conversationId;
       if (!activeConversationId) {
         activeConversationId = await onCreateConversation(prompt);
         if (!activeConversationId) return;
@@ -113,7 +125,10 @@ export const useStreamingChat = ({
         }
 
         const userContent = `${imageMarker(path)}\n${prompt}`;
-        setMessages((prev) => [...prev, { id: localId, role: "user", content: userContent }]);
+        setMessages((prev) => [
+          ...prev,
+          { id: localId, role: "user", content: userContent, createdAt: new Date().toISOString() },
+        ]);
         await persist(activeConversationId, "user", userContent, localId);
 
         const { data, error } = await supabase.functions.invoke("image-edit", {
@@ -134,7 +149,12 @@ export const useStreamingChat = ({
         const assistantContent = `${imageMarker(data.path as string)}\nHere's your edited image.`;
         setMessages((prev) => [
           ...prev,
-          { id: assistantLocalId, role: "assistant", content: assistantContent },
+          {
+            id: assistantLocalId,
+            role: "assistant",
+            content: assistantContent,
+            createdAt: new Date().toISOString(),
+          },
         ]);
         await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
       } catch (err) {
@@ -147,191 +167,219 @@ export const useStreamingChat = ({
     [conversationId, onCreateConversation, persist, userId]
   );
 
-  const sendMessage = useCallback(async (content: string, image?: File) => {
-    // Validate message length
-    if (content.length > MAX_MESSAGE_LENGTH) {
-      toast.error(`Message too long. Please keep messages under ${MAX_MESSAGE_LENGTH.toLocaleString()} characters.`);
-      return;
-    }
+  /**
+   * Core generation loop.
+   * `history` is the conversation state the model should answer from;
+   * the user's turn must already be included.
+   */
+  const runCompletion = useCallback(
+    async (history: Message[], activeConversationId: string, retryPrompt: string) => {
+      let assistantContent = "";
+      const assistantLocalId = `local-${Date.now() + 1}`;
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setIsStreaming(true);
 
-    if (image) {
-      await sendImageEdit(content.trim(), image);
-      return;
-    }
+      const updateAssistant = (chunk: string) => {
+        assistantContent += chunk;
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.id === assistantLocalId) {
+            return prev.map((m, i) =>
+              i === prev.length - 1 ? { ...m, content: assistantContent } : m
+            );
+          }
+          return [
+            ...prev,
+            {
+              id: assistantLocalId,
+              role: "assistant",
+              content: assistantContent,
+              createdAt: new Date().toISOString(),
+            },
+          ];
+        });
+      };
 
-    if (!content.trim()) {
-      return;
-    }
-
-    setFailedMessage(null);
-    let activeConversationId = conversationId;
-
-    // Create conversation if needed
-    if (!activeConversationId) {
-      activeConversationId = await onCreateConversation(content);
-      if (!activeConversationId) return;
-    }
-
-    const userMessage: Message = {
-      id: `local-${Date.now()}`,
-      role: "user",
-      content,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setIsStreaming(true);
-
-    // Save user message to database
-    await persist(activeConversationId, "user", content, userMessage.id);
-
-
-    let assistantContent = "";
-    const assistantLocalId = `local-${Date.now() + 1}`;
-
-
-    const updateAssistant = (chunk: string) => {
-      assistantContent += chunk;
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return prev.map((m, i) =>
-            i === prev.length - 1 ? { ...m, content: assistantContent } : m
-          );
+      const consume = (raw: string) => {
+        if (!raw || raw.startsWith(":") || !raw.startsWith("data: ")) return false;
+        const jsonStr = raw.slice(6).trim();
+        if (jsonStr === "[DONE]") return true;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) updateAssistant(delta);
+        } catch {
+          /* partial frame — ignored, the buffered path retries it */
         }
-        return [
-          ...prev,
-          { id: assistantLocalId, role: "assistant", content: assistantContent },
-        ];
-      });
-    };
+        return false;
+      };
 
-    try {
-      // Get user's session token for authenticated request
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) {
-        toast.error("You must be logged in to use chat");
-        setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
-        setIsStreaming(false);
-        return;
-      }
-
-      // Limit conversation history to prevent unbounded growth
-      const conversationHistory = [...messages, userMessage]
-        .slice(-MAX_HISTORY_MESSAGES)
-        .map(({ role, content }) => ({ role, content }));
-
-      const response = await fetch(CHAT_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ messages: conversationHistory }),
-      });
-
-      if (!response.ok) {
-        // Handle rate limiting
-        if (response.status === 429) {
-          const retryAfter = parseInt(response.headers.get("Retry-After") || "60", 10);
-          setRateLimit({ isLimited: true, retryAfter });
-          setFailedMessage(content);
-          setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+      try {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session) {
+          toast.error("You must be logged in to use chat");
           setIsStreaming(false);
           return;
         }
-        if (response.status === 401) {
-          throw new Error("Your session expired. Please sign in again.");
+
+        const payload = history
+          .slice(-MAX_HISTORY_MESSAGES)
+          .map(({ role, content }) => ({ role, content }));
+
+        const response = await fetch(CHAT_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ messages: payload, mode, instructions }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          if (response.status === 429) {
+            const retryAfter = parseInt(response.headers.get("Retry-After") || "60", 10);
+            setRateLimit({ isLimited: true, retryAfter });
+            setFailedMessage(retryPrompt);
+            setIsStreaming(false);
+            return;
+          }
+          if (response.status === 401) throw new Error("Your session expired. Please sign in again.");
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            typeof errorData.error === "string" ? errorData.error : "Failed to get a response."
+          );
         }
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          typeof errorData.error === "string" ? errorData.error : "Failed to get a response."
+
+        if (!response.body) throw new Error("No response body");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let done = false;
+
+        while (!done) {
+          const { done: streamDone, value } = await reader.read();
+          if (streamDone) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          let newlineIndex: number;
+          while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+            let line = buffer.slice(0, newlineIndex);
+            buffer = buffer.slice(newlineIndex + 1);
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            if (line.trim() === "") continue;
+            if (consume(line)) {
+              done = true;
+              break;
+            }
+          }
+        }
+
+        for (const raw of buffer.split("\n")) {
+          if (raw.trim()) consume(raw);
+        }
+
+        if (assistantContent) {
+          await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          // User pressed stop: keep whatever streamed so far and save it.
+          if (assistantContent) {
+            await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
+          }
+          return;
+        }
+        console.error("Chat error:", error);
+        const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+        toast.error(
+          offline
+            ? "You appear to be offline. Check your connection and retry."
+            : error instanceof Error
+              ? error.message
+              : "Something went wrong. Please try again."
         );
+        setFailedMessage(retryPrompt);
+      } finally {
+        abortRef.current = null;
+        setIsStreaming(false);
+      }
+    },
+    [mode, instructions, persist]
+  );
+
+  const sendMessage = useCallback(
+    async (content: string, image?: File, conversationIdOverride?: string) => {
+      if (content.length > MAX_MESSAGE_LENGTH) {
+        toast.error(
+          `Message too long. Please keep messages under ${MAX_MESSAGE_LENGTH.toLocaleString()} characters.`
+        );
+        return;
       }
 
-      if (!response.body) {
-        throw new Error("No response body");
+      if (image) {
+        await sendImageEdit(content.trim(), image, conversationIdOverride);
+        return;
+      }
+      if (!content.trim()) return;
+
+      setFailedMessage(null);
+      let activeConversationId = conversationIdOverride ?? conversationId;
+      if (!activeConversationId) {
+        activeConversationId = await onCreateConversation(content);
+        if (!activeConversationId) return;
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      const userMessage: Message = {
+        id: `local-${Date.now()}`,
+        role: "user",
+        content,
+        createdAt: new Date().toISOString(),
+      };
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const history = [...messagesRef.current, userMessage];
+      setMessages(history);
+      await persist(activeConversationId, "user", content, userMessage.id);
+      await runCompletion(history, activeConversationId, content);
+    },
+    [conversationId, onCreateConversation, persist, runCompletion, sendImageEdit]
+  );
 
-        buffer += decoder.decode(value, { stream: true });
+  /** Stop the current generation, keeping the partial answer. */
+  const stopGeneration = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
-        let newlineIndex: number;
-        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-          let line = buffer.slice(0, newlineIndex);
-          buffer = buffer.slice(newlineIndex + 1);
+  /** Discard the last assistant reply and generate a fresh one. */
+  const regenerate = useCallback(async () => {
+    if (isStreaming || !conversationId) return;
+    const current = messagesRef.current;
+    const lastAssistantIndex = current.map((m) => m.role).lastIndexOf("assistant");
+    if (lastAssistantIndex === -1) return;
 
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line.startsWith(":") || line.trim() === "") continue;
-          if (!line.startsWith("data: ")) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === "[DONE]") break;
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (delta) updateAssistant(delta);
-          } catch {
-            buffer = line + "\n" + buffer;
-            break;
-          }
-        }
-      }
-
-      // Flush remaining buffer
-      if (buffer.trim()) {
-        for (let raw of buffer.split("\n")) {
-          if (!raw || raw.startsWith(":") || raw.trim() === "") continue;
-          if (!raw.startsWith("data: ")) continue;
-          const jsonStr = raw.slice(6).trim();
-          if (jsonStr === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (delta) updateAssistant(delta);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-
-      // Save assistant message to database
-      if (assistantContent && activeConversationId) {
-        await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
-      }
-
-    } catch (error) {
-      console.error("Chat error:", error);
-      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-      const message = offline
-        ? "You appear to be offline. Check your connection and retry."
-        : error instanceof Error
-          ? error.message
-          : "Something went wrong. Please try again.";
-      toast.error(message);
-      setFailedMessage(content);
-      // Remove the user message if we failed
-      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
-    } finally {
-      setIsStreaming(false);
+    const last = current[lastAssistantIndex];
+    if (!last.id.startsWith("local-") && onDeleteMessage) {
+      const ok = await onDeleteMessage(last.id);
+      if (!ok) return;
     }
-  }, [messages, conversationId, onCreateConversation, persist, sendImageEdit]);
+
+    const trimmed = current.slice(0, lastAssistantIndex);
+    setMessages(trimmed);
+    messagesRef.current = trimmed;
+    const lastUser = [...trimmed].reverse().find((m) => m.role === "user");
+    await runCompletion(trimmed, conversationId, lastUser?.content ?? "");
+  }, [conversationId, isStreaming, onDeleteMessage, runCompletion]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
+    messagesRef.current = [];
     setFailedMessage(null);
   }, []);
 
   const deleteMessage = useCallback(
     async (messageId: string) => {
-      // Locally-created messages have no database row yet.
       if (!messageId.startsWith("local-") && onDeleteMessage) {
         const ok = await onDeleteMessage(messageId);
         if (!ok) return;
@@ -351,7 +399,8 @@ export const useStreamingChat = ({
     isStreaming,
     sendMessage,
     deleteMessage,
-
+    stopGeneration,
+    regenerate,
     clearMessages,
     rateLimit,
     retryLast,
