@@ -208,11 +208,11 @@ export const useConversations = (userId: string | undefined) => {
     currentConversationId,
     loading,
     createConversation,
+    createBranch,
     loadMessages,
     saveMessage,
     deleteConversation,
     deleteMessage,
-
     selectConversation,
     startNewChat,
     refreshConversations: fetchConversations,
