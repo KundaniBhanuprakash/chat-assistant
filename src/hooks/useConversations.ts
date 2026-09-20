@@ -6,6 +6,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt?: string;
 }
 
 interface Conversation {
@@ -89,8 +90,51 @@ export const useConversations = (userId: string | undefined) => {
       id: msg.id,
       role: msg.role as "user" | "assistant",
       content: msg.content,
+      createdAt: msg.created_at,
     }));
   }, []);
+
+  /**
+   * Copy an earlier slice of a conversation into a brand-new conversation so an
+   * edited message starts a fresh branch without touching the original history.
+   */
+  const createBranch = useCallback(
+    async (history: Message[], title: string): Promise<string | null> => {
+      if (!userId) return null;
+
+      const { data, error } = await supabase
+        .from("conversations")
+        .insert({ user_id: userId, title: title.slice(0, 50) + (title.length > 50 ? "..." : "") })
+        .select()
+        .single();
+
+      if (error || !data) {
+        console.error("Error branching conversation:", error);
+        toast.error("Could not start a new branch");
+        return null;
+      }
+
+      if (history.length > 0) {
+        const { error: copyError } = await supabase.from("messages").insert(
+          history.map((m) => ({
+            conversation_id: data.id,
+            role: m.role,
+            content: m.content,
+          }))
+        );
+        if (copyError) {
+          console.error("Error copying branch history:", copyError);
+          toast.error("Could not copy the earlier messages");
+          return null;
+        }
+      }
+
+      setConversations((prev) => [data, ...prev]);
+      setCurrentConversationId(data.id);
+      return data.id;
+    },
+    [userId]
+  );
 
   // Save a message
   const saveMessage = useCallback(async (
@@ -164,11 +208,11 @@ export const useConversations = (userId: string | undefined) => {
     currentConversationId,
     loading,
     createConversation,
+    createBranch,
     loadMessages,
     saveMessage,
     deleteConversation,
     deleteMessage,
-
     selectConversation,
     startNewChat,
     refreshConversations: fetchConversations,

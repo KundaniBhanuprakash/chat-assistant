@@ -1,14 +1,30 @@
 import { cn } from "@/lib/utils";
-import { Bot, User, ThumbsUp, ThumbsDown, Copy, Check, Trash2 } from "lucide-react";
+import {
+  Bot,
+  User,
+  ThumbsUp,
+  ThumbsDown,
+  Copy,
+  Check,
+  Trash2,
+  RefreshCw,
+  Pencil,
+  X,
+} from "lucide-react";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import StoredImage from "./StoredImage";
 import { IMAGE_MARKER_REGEX } from "@/lib/chatImages";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
+  createdAt?: string;
   onDelete?: () => void;
+  onRegenerate?: () => void;
+  onEdit?: (newContent: string) => void;
 }
 
 type Reaction = "up" | "down" | null;
@@ -49,6 +65,12 @@ const parseBlocks = (content: string): Block[] => {
 /** Text shown when copying: image markers are not useful on the clipboard. */
 const plainText = (content: string) => content.replace(IMAGE_MARKER_REGEX, "").trim();
 
+const formatTime = (iso?: string) => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+};
 
 const copyText = async (text: string) => {
   try {
@@ -104,11 +126,24 @@ const CodeBlock = ({ value, lang }: { value: string; lang?: string }) => {
   );
 };
 
-const ChatMessage = ({ role, content, onDelete }: ChatMessageProps) => {
+const iconButton =
+  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+const ChatMessage = ({
+  role,
+  content,
+  createdAt,
+  onDelete,
+  onRegenerate,
+  onEdit,
+}: ChatMessageProps) => {
   const isUser = role === "user";
   const [reaction, setReaction] = useState<Reaction>(null);
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(content);
   const blocks = useMemo(() => parseBlocks(content), [content]);
+  const timestamp = formatTime(createdAt);
 
   const handleReaction = (type: "up" | "down") => {
     setReaction((prev) => (prev === type ? null : type));
@@ -116,13 +151,24 @@ const ChatMessage = ({ role, content, onDelete }: ChatMessageProps) => {
 
   const handleCopy = async () => {
     if (await copyText(plainText(content))) {
-
       setCopied(true);
       toast.success("Copied to clipboard");
       setTimeout(() => setCopied(false), 2000);
     } else {
       toast.error("Failed to copy");
     }
+  };
+
+  const startEdit = () => {
+    setDraft(plainText(content));
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    const value = draft.trim();
+    if (!value || !onEdit) return;
+    setEditing(false);
+    onEdit(value);
   };
 
   return (
@@ -135,95 +181,151 @@ const ChatMessage = ({ role, content, onDelete }: ChatMessageProps) => {
       <div
         className={cn(
           "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center",
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-secondary border border-border"
+          isUser ? "bg-primary text-primary-foreground" : "bg-secondary border border-border"
         )}
         aria-hidden="true"
       >
         {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
       <div className={cn("flex min-w-0 flex-col gap-1", isUser ? "items-end" : "items-start")}>
-        <div
-          className={cn(
-            "message-bubble min-w-0 overflow-hidden",
-            isUser ? "message-user" : "message-assistant"
-          )}
-        >
-          <span className="sr-only">{isUser ? "You said:" : "Assistant said:"}</span>
-          {blocks.map((block, i) =>
-            block.type === "code" ? (
-              <CodeBlock key={i} value={block.value} lang={block.lang} />
-            ) : block.type === "image" ? (
-              <StoredImage
-                key={i}
-                path={block.value}
-                alt={isUser ? "Image you shared" : "Edited image"}
-              />
-            ) : (
-              <p
-                key={i}
-                className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
-              >
-                {block.value.replace(/^\n+|\n+$/g, "")}
-              </p>
-            )
-          )}
-        </div>
-        <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity duration-200">
-          {!isUser && (
-            <>
-              <button
-                onClick={handleCopy}
-                className={cn(
-                  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  copied
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                )}
-                aria-label="Copy message to clipboard"
-              >
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-              <button
-                onClick={() => handleReaction("up")}
-                aria-pressed={reaction === "up"}
-                className={cn(
-                  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  reaction === "up"
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                )}
-                aria-label="Mark response as helpful"
-              >
-                <ThumbsUp className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => handleReaction("down")}
-                aria-pressed={reaction === "down"}
-                className={cn(
-                  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  reaction === "down"
-                    ? "bg-destructive/20 text-destructive"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                )}
-                aria-label="Mark response as not helpful"
-              >
-                <ThumbsDown className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
-          {onDelete && (
-            <button
-              onClick={onDelete}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-all duration-200 hover:bg-destructive/20 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label="Delete this message"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
+        {editing ? (
+          <div className="w-full min-w-0 rounded-2xl border border-border bg-card p-2">
+            <label htmlFor="edit-message" className="sr-only">
+              Edit your message
+            </label>
+            <Textarea
+              id="edit-message"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              autoFocus
+              className="min-h-[72px] resize-none border-0 bg-transparent text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                <X className="mr-1 h-3.5 w-3.5" />
+                Cancel
+              </Button>
+              <Button size="sm" onClick={saveEdit} disabled={!draft.trim()}>
+                Send as new branch
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div
+            className={cn(
+              "message-bubble min-w-0 overflow-hidden",
+              isUser ? "message-user" : "message-assistant"
+            )}
+          >
+            <span className="sr-only">{isUser ? "You said:" : "Assistant said:"}</span>
+            {blocks.map((block, i) =>
+              block.type === "code" ? (
+                <CodeBlock key={i} value={block.value} lang={block.lang} />
+              ) : block.type === "image" ? (
+                <StoredImage
+                  key={i}
+                  path={block.value}
+                  alt={isUser ? "Image you shared" : "Edited image"}
+                />
+              ) : (
+                <p
+                  key={i}
+                  className="text-sm leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                >
+                  {block.value.replace(/^\n+|\n+$/g, "")}
+                </p>
+              )
+            )}
+          </div>
+        )}
 
+        {!editing && (
+          <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity duration-200">
+            {timestamp && (
+              <span className="px-1 text-[11px] tabular-nums text-muted-foreground/70">
+                {timestamp}
+              </span>
+            )}
+            {!isUser && (
+              <>
+                <button
+                  onClick={handleCopy}
+                  className={cn(
+                    iconButton,
+                    copied
+                      ? "bg-primary/20 text-primary"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                  aria-label="Copy message to clipboard"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                {onRegenerate && (
+                  <button
+                    onClick={onRegenerate}
+                    className={cn(
+                      iconButton,
+                      "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    )}
+                    aria-label="Generate a different answer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  onClick={() => handleReaction("up")}
+                  aria-pressed={reaction === "up"}
+                  className={cn(
+                    iconButton,
+                    reaction === "up"
+                      ? "bg-primary/20 text-primary"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                  aria-label="Mark response as helpful"
+                >
+                  <ThumbsUp className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => handleReaction("down")}
+                  aria-pressed={reaction === "down"}
+                  className={cn(
+                    iconButton,
+                    reaction === "down"
+                      ? "bg-destructive/20 text-destructive"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
+                  aria-label="Mark response as not helpful"
+                >
+                  <ThumbsDown className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+            {isUser && onEdit && (
+              <button
+                onClick={startEdit}
+                className={cn(
+                  iconButton,
+                  "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+                aria-label="Edit this message and start a new branch"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={onDelete}
+                className={cn(
+                  iconButton,
+                  "text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+                )}
+                aria-label="Delete this message"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

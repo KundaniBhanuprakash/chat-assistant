@@ -11,11 +11,13 @@ import { useAuth } from "@/hooks/useAuth";
 import { Menu, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { loadPreferredMode, savePreferredMode, modeLabel, type ChatMode } from "@/lib/models";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  createdAt?: string;
 }
 
 const ChatContainer = () => {
@@ -23,12 +25,14 @@ const ChatContainer = () => {
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [loadedMessages, setLoadedMessages] = useState<Message[]>([]);
+  const [mode, setMode] = useState<ChatMode>(() => loadPreferredMode());
 
   const {
     conversations,
     currentConversationId,
     loading: conversationsLoading,
     createConversation,
+    createBranch,
     loadMessages,
     saveMessage,
     deleteConversation,
@@ -42,6 +46,8 @@ const ChatContainer = () => {
     isStreaming,
     sendMessage,
     deleteMessage,
+    stopGeneration,
+    regenerate,
     clearMessages,
     rateLimit,
     retryLast,
@@ -49,12 +55,12 @@ const ChatContainer = () => {
   } = useStreamingChat({
     conversationId: currentConversationId,
     userId: user?.id,
+    mode,
     onCreateConversation: createConversation,
     onSaveMessage: saveMessage,
     onDeleteMessage: deleteMessageRow,
     initialMessages: loadedMessages,
   });
-
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLElement>(null);
@@ -95,6 +101,11 @@ const ChatContainer = () => {
     };
   }, [currentConversationId, loadMessages]);
 
+  const handleModeChange = useCallback((next: ChatMode) => {
+    setMode(next);
+    savePreferredMode(next);
+  }, []);
+
   const handleNewChat = useCallback(() => {
     startNewChat();
     clearMessages();
@@ -110,9 +121,28 @@ const ChatContainer = () => {
     [selectConversation, isMobile]
   );
 
+  /**
+   * Editing an earlier message copies everything before it into a new
+   * conversation, so the original thread stays intact.
+   */
+  const handleEditMessage = useCallback(
+    async (messageId: string, newContent: string) => {
+      const index = messages.findIndex((m) => m.id === messageId);
+      if (index === -1) return;
+      const history = messages.slice(0, index);
+      const branchId = await createBranch(history, newContent);
+      if (!branchId) return;
+      setLoadedMessages(history);
+      await sendMessage(newContent, undefined, branchId);
+    },
+    [messages, createBranch, sendMessage]
+  );
+
   const handleSignOut = async () => {
     await signOut();
   };
+
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
 
   return (
     <div className="flex h-full min-h-0 overflow-hidden">
@@ -157,7 +187,12 @@ const ChatContainer = () => {
               {sidebarOpen && isMobile ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </Button>
             <div className="w-2 h-2 rounded-full bg-primary animate-pulse-glow" aria-hidden="true" />
-            <h1 className="text-lg font-medium text-foreground truncate">AI Assistant</h1>
+            <div className="min-w-0">
+              <h1 className="text-lg font-medium text-foreground truncate leading-tight">
+                AI Assistant
+              </h1>
+              <p className="text-xs text-muted-foreground truncate">{modeLabel(mode)}</p>
+            </div>
           </div>
         </header>
 
@@ -177,7 +212,18 @@ const ChatContainer = () => {
                   key={message.id}
                   role={message.role}
                   content={message.content}
+                  createdAt={message.createdAt}
                   onDelete={() => void deleteMessage(message.id)}
+                  onRegenerate={
+                    !isStreaming && message.id === lastAssistantId
+                      ? () => void regenerate()
+                      : undefined
+                  }
+                  onEdit={
+                    message.role === "user" && !isStreaming
+                      ? (content) => void handleEditMessage(message.id, content)
+                      : undefined
+                  }
                 />
               ))}
 
@@ -205,7 +251,14 @@ const ChatContainer = () => {
 
         {/* Input Area */}
         <footer className="flex-shrink-0 p-3 sm:p-4 border-t border-border/50 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <ChatInput onSend={sendMessage} disabled={isStreaming || rateLimit.isLimited} />
+          <ChatInput
+            onSend={sendMessage}
+            disabled={isStreaming || rateLimit.isLimited}
+            mode={mode}
+            onModeChange={handleModeChange}
+            isStreaming={isStreaming}
+            onStop={stopGeneration}
+          />
         </footer>
       </div>
     </div>
