@@ -1,16 +1,29 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, ImagePlus, X } from "lucide-react";
+import { Send, ImagePlus, X, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { MAX_IMAGE_BYTES } from "@/lib/chatImages";
+import ModelSelector from "./ModelSelector";
+import type { ChatMode } from "@/lib/models";
 
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
   disabled?: boolean;
+  mode: ChatMode;
+  onModeChange: (mode: ChatMode) => void;
+  isStreaming?: boolean;
+  onStop?: () => void;
 }
 
-const ChatInput = ({ onSend, disabled }: ChatInputProps) => {
+const ChatInput = ({
+  onSend,
+  disabled,
+  mode,
+  onModeChange,
+  isStreaming,
+  onStop,
+}: ChatInputProps) => {
   const [input, setInput] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
