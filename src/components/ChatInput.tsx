@@ -147,15 +147,30 @@ const ChatInput = ({
             className="min-h-[52px] max-h-[160px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-base sm:text-sm placeholder:text-muted-foreground/60"
             rows={1}
           />
-          <Button
-            type="submit"
-            size="icon"
-            aria-label="Send message"
-            disabled={(!input.trim() && !image) || disabled}
-            className="h-11 w-11 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 disabled:opacity-40"
-          >
-            <Send className="w-4 h-4" />
-          </Button>
+          {isStreaming && onStop ? (
+            <Button
+              type="button"
+              size="icon"
+              onClick={onStop}
+              aria-label="Stop generating"
+              className="h-11 w-11 rounded-xl bg-secondary text-foreground hover:bg-secondary/80"
+            >
+              <Square className="w-4 h-4 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              size="icon"
+              aria-label="Send message"
+              disabled={(!input.trim() && !image) || disabled}
+              className="h-11 w-11 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 disabled:opacity-40"
+            >
+              <Send className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2 px-1 pt-1">
+          <ModelSelector value={mode} onChange={onModeChange} disabled={isStreaming} />
         </div>
       </div>
       <p className="hidden sm:block text-xs text-muted-foreground/70 text-center mt-2">
