@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          project_id: string | null
           title: string
           updated_at: string
           user_id: string
@@ -25,6 +26,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          project_id?: string | null
           title?: string
           updated_at?: string
           user_id: string
@@ -32,11 +34,112 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          project_id?: string | null
           title?: string
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "conversations_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_chunks: {
+        Row: {
+          chunk_index: number
+          content: string
+          created_at: string
+          document_id: string
+          id: string
+          tsv: unknown
+          user_id: string
+        }
+        Insert: {
+          chunk_index?: number
+          content: string
+          created_at?: string
+          document_id: string
+          id?: string
+          tsv?: unknown
+          user_id: string
+        }
+        Update: {
+          chunk_index?: number
+          content?: string
+          created_at?: string
+          document_id?: string
+          id?: string
+          tsv?: unknown
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_chunks_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          char_count: number
+          conversation_id: string | null
+          created_at: string
+          id: string
+          mime_type: string
+          name: string
+          project_id: string | null
+          size_bytes: number
+          summary: string
+          user_id: string
+        }
+        Insert: {
+          char_count?: number
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          mime_type?: string
+          name: string
+          project_id?: string | null
+          size_bytes?: number
+          summary?: string
+          user_id: string
+        }
+        Update: {
+          char_count?: number
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          mime_type?: string
+          name?: string
+          project_id?: string | null
+          size_bytes?: number
+          summary?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       messages: {
         Row: {
@@ -70,6 +173,33 @@ export type Database = {
           },
         ]
       }
+      projects: {
+        Row: {
+          created_at: string
+          id: string
+          instructions: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          instructions?: string
+          name?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          instructions?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       rate_limits: {
         Row: {
           created_at: string
@@ -97,6 +227,54 @@ export type Database = {
         }
         Relationships: []
       }
+      user_memories: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          source: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          source?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          source?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          created_at: string
+          custom_instructions: string
+          memory_enabled: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          custom_instructions?: string
+          memory_enabled?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          custom_instructions?: string
+          memory_enabled?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -110,6 +288,21 @@ export type Database = {
           p_window_minutes?: number
         }
         Returns: boolean
+      }
+      search_document_chunks: {
+        Args: {
+          p_document_ids?: string[]
+          p_limit?: number
+          p_query: string
+          p_user_id: string
+        }
+        Returns: {
+          chunk_index: number
+          content: string
+          document_id: string
+          document_name: string
+          rank: number
+        }[]
       }
     }
     Enums: {
