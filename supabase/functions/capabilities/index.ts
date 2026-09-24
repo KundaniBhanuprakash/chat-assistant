@@ -21,12 +21,16 @@ serve((req) => {
     chat: gateway,
     imageEdit: gateway,
     imageGeneration: gateway,
-    // Web search and deep research need a dedicated search provider.
+    imageUnderstanding: gateway,
+    // Live web results need a dedicated search provider.
     webSearch: has("TAVILY_API_KEY"),
-    deepResearch: has("TAVILY_API_KEY") && gateway,
-    voiceInput: gateway,
-    voiceOutput: gateway,
-    documents: false,
+    // Research works over attached documents even without a web provider.
+    deepResearch: gateway,
+    voiceInput: false,
+    voiceOutput: false,
+    documents: true,
+    memory: true,
+    projects: true,
     // Code execution runs client-side in a sandbox; enabled in a later phase.
     codeExecution: false,
   };
