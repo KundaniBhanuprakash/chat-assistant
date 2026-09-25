@@ -14,12 +14,13 @@ interface Conversation {
   title: string;
   created_at: string;
   updated_at: string;
+  project_id?: string | null;
 }
 
 // Only the most recent messages are loaded to keep long chats fast.
 const MESSAGE_PAGE_SIZE = 100;
 
-export const useConversations = (userId: string | undefined) => {
+export const useConversations = (userId: string | undefined, projectId: string | null = null) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,7 +57,7 @@ export const useConversations = (userId: string | undefined) => {
     
     const { data, error } = await supabase
       .from("conversations")
-      .insert({ user_id: userId, title })
+      .insert({ user_id: userId, title, project_id: projectId })
       .select()
       .single();
 
@@ -69,7 +70,7 @@ export const useConversations = (userId: string | undefined) => {
     setConversations((prev) => [data, ...prev]);
     setCurrentConversationId(data.id);
     return data.id;
-  }, [userId]);
+  }, [userId, projectId]);
 
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string): Promise<Message[]> => {
@@ -104,7 +105,11 @@ export const useConversations = (userId: string | undefined) => {
 
       const { data, error } = await supabase
         .from("conversations")
-        .insert({ user_id: userId, title: title.slice(0, 50) + (title.length > 50 ? "..." : "") })
+        .insert({
+          user_id: userId,
+          title: title.slice(0, 50) + (title.length > 50 ? "..." : ""),
+          project_id: projectId,
+        })
         .select()
         .single();
 
@@ -133,7 +138,7 @@ export const useConversations = (userId: string | undefined) => {
       setCurrentConversationId(data.id);
       return data.id;
     },
-    [userId]
+    [userId, projectId]
   );
 
   // Save a message

@@ -2,7 +2,9 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { imageMarker, uploadChatImage } from "@/lib/chatImages";
+import { extractMemories } from "@/lib/memory";
 import type { ChatMode } from "@/lib/models";
+import type { SendOptions } from "@/components/ChatInput";
 
 export interface Message {
   id: string;
@@ -20,11 +22,20 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 const MAX_MESSAGE_LENGTH = 10000;
 const MAX_HISTORY_MESSAGES = 20;
 
+const fileToDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
 interface UseStreamingChatOptions {
   conversationId: string | null;
   userId?: string;
   mode: ChatMode;
-  instructions?: string;
+  projectId?: string | null;
+  documentIds?: string[];
   onCreateConversation: (firstMessage: string) => Promise<string | null>;
   onSaveMessage: (
     conversationId: string,
@@ -32,6 +43,7 @@ interface UseStreamingChatOptions {
     content: string
   ) => Promise<string | null>;
   onDeleteMessage?: (messageId: string) => Promise<boolean>;
+  onRememberFacts?: (facts: string[]) => void;
   initialMessages?: Message[];
 }
 
@@ -39,14 +51,17 @@ export const useStreamingChat = ({
   conversationId,
   userId,
   mode,
-  instructions,
+  projectId,
+  documentIds,
   onCreateConversation,
   onSaveMessage,
   onDeleteMessage,
+  onRememberFacts,
   initialMessages = [],
 }: UseStreamingChatOptions) => {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isResearching, setIsResearching] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo>({ isLimited: false, retryAfter: 0 });
   const [failedMessage, setFailedMessage] = useState<string | null>(null);
   const rateLimitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -173,7 +188,12 @@ export const useStreamingChat = ({
    * the user's turn must already be included.
    */
   const runCompletion = useCallback(
-    async (history: Message[], activeConversationId: string, retryPrompt: string) => {
+    async (
+      history: Message[],
+      activeConversationId: string,
+      retryPrompt: string,
+      images: string[] = []
+    ) => {
       let assistantContent = "";
       const assistantLocalId = `local-${Date.now() + 1}`;
       const controller = new AbortController();
@@ -215,6 +235,21 @@ export const useStreamingChat = ({
         return false;
       };
 
+      /** Strip any memory notes before the reply is stored or shown. */
+      const finalise = async () => {
+        const { clean, facts } = extractMemories(assistantContent);
+        if (facts.length && onRememberFacts) onRememberFacts(facts);
+        if (clean !== assistantContent) {
+          assistantContent = clean;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantLocalId ? { ...m, content: clean } : m))
+          );
+        }
+        if (assistantContent.trim()) {
+          await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
+        }
+      };
+
       try {
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         if (sessionError || !session) {
@@ -233,7 +268,13 @@ export const useStreamingChat = ({
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ messages: payload, mode, instructions }),
+          body: JSON.stringify({
+            messages: payload,
+            mode,
+            projectId: projectId ?? null,
+            documentIds: documentIds ?? [],
+            images,
+          }),
           signal: controller.signal,
         });
 
@@ -281,15 +322,11 @@ export const useStreamingChat = ({
           if (raw.trim()) consume(raw);
         }
 
-        if (assistantContent) {
-          await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
-        }
+        await finalise();
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           // User pressed stop: keep whatever streamed so far and save it.
-          if (assistantContent) {
-            await persist(activeConversationId, "assistant", assistantContent, assistantLocalId);
-          }
+          await finalise();
           return;
         }
         console.error("Chat error:", error);
@@ -307,11 +344,71 @@ export const useStreamingChat = ({
         setIsStreaming(false);
       }
     },
-    [mode, instructions, persist]
+    [mode, projectId, documentIds, persist, onRememberFacts]
+  );
+
+  /** Multi-step research: plan, gather sources, answer with citations. */
+  const runResearch = useCallback(
+    async (question: string, targetConversationId?: string) => {
+      setFailedMessage(null);
+      let activeConversationId = targetConversationId ?? conversationId;
+      if (!activeConversationId) {
+        activeConversationId = await onCreateConversation(question);
+        if (!activeConversationId) return;
+      }
+
+      const userMessage: Message = {
+        id: `local-${Date.now()}`,
+        role: "user",
+        content: question,
+        createdAt: new Date().toISOString(),
+      };
+      const history = [...messagesRef.current, userMessage];
+      setMessages(history);
+      await persist(activeConversationId, "user", question, userMessage.id);
+
+      setIsResearching(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("research", {
+          body: {
+            question,
+            projectId: projectId ?? null,
+            documentIds: documentIds ?? [],
+          },
+        });
+
+        const answer = (data as { answer?: string } | null)?.answer;
+        if (error || !answer) {
+          const message =
+            (data as { error?: string } | null)?.error ??
+            error?.message ??
+            "The research run failed. Please try again.";
+          toast.error(message);
+          setFailedMessage(question);
+          return;
+        }
+
+        const localId = `local-${Date.now() + 1}`;
+        setMessages((prev) => [
+          ...prev,
+          { id: localId, role: "assistant", content: answer, createdAt: new Date().toISOString() },
+        ]);
+        await persist(activeConversationId, "assistant", answer, localId);
+      } catch (err) {
+        console.error("Research error:", err);
+        toast.error("The research run failed. Please try again.");
+        setFailedMessage(question);
+      } finally {
+        setIsResearching(false);
+      }
+    },
+    [conversationId, documentIds, onCreateConversation, persist, projectId]
   );
 
   const sendMessage = useCallback(
-    async (content: string, image?: File, conversationIdOverride?: string) => {
+    async (content: string, options: SendOptions & { conversationIdOverride?: string } = {}) => {
+      const { image, imageIntent = "ask", research, conversationIdOverride } = options;
+
       if (content.length > MAX_MESSAGE_LENGTH) {
         toast.error(
           `Message too long. Please keep messages under ${MAX_MESSAGE_LENGTH.toLocaleString()} characters.`
@@ -319,11 +416,16 @@ export const useStreamingChat = ({
         return;
       }
 
-      if (image) {
+      if (image && imageIntent === "edit") {
         await sendImageEdit(content.trim(), image, conversationIdOverride);
         return;
       }
-      if (!content.trim()) return;
+      if (!content.trim() && !image) return;
+
+      if (research && !image) {
+        await runResearch(content.trim(), conversationIdOverride);
+        return;
+      }
 
       setFailedMessage(null);
       let activeConversationId = conversationIdOverride ?? conversationId;
@@ -332,19 +434,48 @@ export const useStreamingChat = ({
         if (!activeConversationId) return;
       }
 
+      // An image the user wants to talk about is stored for the transcript and
+      // also sent inline so the model can actually look at it.
+      let displayContent = content;
+      const inlineImages: string[] = [];
+      if (image && userId) {
+        setIsStreaming(true);
+        try {
+          const [path, dataUrl] = await Promise.all([
+            uploadChatImage(image, userId),
+            fileToDataUrl(image),
+          ]);
+          if (path) displayContent = `${imageMarker(path)}\n${content}`;
+          inlineImages.push(dataUrl);
+        } catch (err) {
+          console.error("Image attach failed:", err);
+          toast.error("Could not attach that image. Please try again.");
+          setIsStreaming(false);
+          return;
+        }
+      }
+
       const userMessage: Message = {
         id: `local-${Date.now()}`,
         role: "user",
-        content,
+        content: displayContent,
         createdAt: new Date().toISOString(),
       };
 
       const history = [...messagesRef.current, userMessage];
       setMessages(history);
-      await persist(activeConversationId, "user", content, userMessage.id);
-      await runCompletion(history, activeConversationId, content);
+      await persist(activeConversationId, "user", displayContent, userMessage.id);
+      await runCompletion(history, activeConversationId, content, inlineImages);
     },
-    [conversationId, onCreateConversation, persist, runCompletion, sendImageEdit]
+    [
+      conversationId,
+      onCreateConversation,
+      persist,
+      runCompletion,
+      runResearch,
+      sendImageEdit,
+      userId,
+    ]
   );
 
   /** Stop the current generation, keeping the partial answer. */
@@ -397,6 +528,8 @@ export const useStreamingChat = ({
   return {
     messages,
     isStreaming,
+    isResearching,
+    busy: isStreaming || isResearching,
     sendMessage,
     deleteMessage,
     stopGeneration,
