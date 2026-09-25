@@ -70,6 +70,12 @@ export const assembleContext = async (
           lines.join("\n")
       );
     }
+    parts.push(
+      "If the user states a durable fact or preference worth remembering for future conversations " +
+        "(their name, role, tools, standing preferences), append a single note in the exact form " +
+        "[[remember: the fact]] at the very end of your reply. Use it sparingly, never for " +
+        "one-off task details, and never mention the note itself."
+    );
   }
 
   // Project instructions
