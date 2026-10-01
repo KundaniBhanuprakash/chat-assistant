@@ -1,7 +1,16 @@
 import { useState } from "react";
-import { MessageSquare, Plus, Trash2, LogOut, Loader2 } from "lucide-react";
+import { MessageSquare, Plus, Trash2, LogOut, Loader2, Settings, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { Project } from "@/hooks/useProjects";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,7 +39,14 @@ interface ChatSidebarProps {
   onDeleteConversation: (id: string) => void;
   onSignOut: () => void;
   userEmail?: string;
+  projects?: Project[];
+  currentProjectId?: string | null;
+  onSelectProject?: (id: string | null) => void;
+  onCreateProject?: (name: string) => void;
+  onOpenSettings?: () => void;
 }
+
+const ALL_CHATS = "__all__";
 
 const ChatSidebar = ({
   conversations,
@@ -41,8 +57,15 @@ const ChatSidebar = ({
   onDeleteConversation,
   onSignOut,
   userEmail,
+  projects = [],
+  currentProjectId = null,
+  onSelectProject,
+  onCreateProject,
+  onOpenSettings,
 }: ChatSidebarProps) => {
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
+  const [newProject, setNewProject] = useState("");
+  const [creatingProject, setCreatingProject] = useState(false);
 
   return (
     <nav
@@ -50,7 +73,7 @@ const ChatSidebar = ({
       className="w-[min(16rem,85vw)] h-full min-h-0 flex flex-col bg-sidebar border-r border-sidebar-border pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
       {/* Header */}
-      <div className="p-4 border-b border-sidebar-border">
+      <div className="p-4 border-b border-sidebar-border space-y-3">
         <Button
           onClick={onNewChat}
           className="w-full min-h-11 bg-primary hover:bg-primary/90 gap-2"
@@ -58,6 +81,64 @@ const ChatSidebar = ({
           <Plus className="w-4 h-4" />
           New Chat
         </Button>
+
+        {onSelectProject && (
+          <div className="space-y-2">
+            <Select
+              value={currentProjectId ?? ALL_CHATS}
+              onValueChange={(value) =>
+                onSelectProject(value === ALL_CHATS ? null : value)
+              }
+            >
+              <SelectTrigger className="min-h-11 text-sm" aria-label="Project">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <SelectValue placeholder="All chats" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_CHATS}>All chats</SelectItem>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {onCreateProject &&
+              (creatingProject ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!newProject.trim()) return;
+                    onCreateProject(newProject);
+                    setNewProject("");
+                    setCreatingProject(false);
+                  }}
+                >
+                  <Input
+                    autoFocus
+                    value={newProject}
+                    maxLength={80}
+                    onChange={(e) => setNewProject(e.target.value)}
+                    onBlur={() => !newProject.trim() && setCreatingProject(false)}
+                    placeholder="Project name, then Enter"
+                    aria-label="New project name"
+                    className="min-h-11 text-sm"
+                  />
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCreatingProject(true)}
+                  className="w-full rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
+                >
+                  + New project
+                </button>
+              ))}
+          </div>
+        )}
       </div>
 
       {/* Conversations List */}
@@ -120,6 +201,16 @@ const ChatSidebar = ({
           </div>
           <span className="text-xs text-muted-foreground truncate flex-1">{userEmail}</span>
         </div>
+        {onOpenSettings && (
+          <Button
+            variant="ghost"
+            onClick={onOpenSettings}
+            className="w-full min-h-11 justify-start gap-2 text-muted-foreground hover:text-foreground"
+          >
+            <Settings className="w-4 h-4" />
+            Settings
+          </Button>
+        )}
         <Button
           variant="ghost"
           onClick={onSignOut}

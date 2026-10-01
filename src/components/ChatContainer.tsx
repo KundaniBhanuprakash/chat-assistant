@@ -1,17 +1,22 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import ChatMessage from "./ChatMessage";
-import ChatInput from "./ChatInput";
+import ChatInput, { type SendOptions } from "./ChatInput";
 import TypingIndicator from "./TypingIndicator";
 import WelcomeScreen from "./WelcomeScreen";
 import ChatSidebar from "./ChatSidebar";
 import RateLimitBanner from "./RateLimitBanner";
+import SettingsDialog from "./SettingsDialog";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useConversations } from "@/hooks/useConversations";
+import { useProjects } from "@/hooks/useProjects";
+import { useDocuments } from "@/hooks/useDocuments";
+import { useUserSettings } from "@/hooks/useUserSettings";
 import { useAuth } from "@/hooks/useAuth";
 import { Menu, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { loadPreferredMode, savePreferredMode, modeLabel, type ChatMode } from "@/lib/models";
+import { DEFAULT_CAPABILITIES, fetchCapabilities, type Capabilities } from "@/lib/features";
 
 interface Message {
   id: string;
@@ -24,8 +29,30 @@ const ChatContainer = () => {
   const { user, signOut } = useAuth();
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [loadedMessages, setLoadedMessages] = useState<Message[]>([]);
   const [mode, setMode] = useState<ChatMode>(() => loadPreferredMode());
+  const [capabilities, setCapabilities] = useState<Capabilities>(DEFAULT_CAPABILITIES);
+
+  useEffect(() => {
+    let active = true;
+    fetchCapabilities().then((caps) => {
+      if (active) setCapabilities(caps);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const {
+    projects,
+    currentProjectId,
+    currentProject,
+    selectProject,
+    createProject,
+    updateProject,
+    deleteProject,
+  } = useProjects(user?.id);
 
   const {
     conversations,
@@ -39,11 +66,38 @@ const ChatContainer = () => {
     deleteMessage: deleteMessageRow,
     selectConversation,
     startNewChat,
-  } = useConversations(user?.id);
+  } = useConversations(user?.id, currentProjectId);
+
+  const { documents, uploading, addDocument, removeDocument, attachOrphansToConversation } =
+    useDocuments(user?.id, currentConversationId, currentProjectId);
+
+  const { settings, memories, saveSettings, addMemory, deleteMemory, clearMemories } =
+    useUserSettings(user?.id);
+
+  const documentIds = useMemo(() => documents.map((d) => d.id), [documents]);
+
+  const handleRememberFacts = useCallback(
+    (facts: string[]) => {
+      if (!settings.memory_enabled) return;
+      facts.forEach((fact) => void addMemory(fact, "auto"));
+    },
+    [addMemory, settings.memory_enabled]
+  );
+
+  const handleCreateConversation = useCallback(
+    async (firstMessage: string) => {
+      const id = await createConversation(firstMessage);
+      if (id) await attachOrphansToConversation(id);
+      return id;
+    },
+    [createConversation, attachOrphansToConversation]
+  );
 
   const {
     messages,
     isStreaming,
+    isResearching,
+    busy,
     sendMessage,
     deleteMessage,
     stopGeneration,
@@ -56,9 +110,12 @@ const ChatContainer = () => {
     conversationId: currentConversationId,
     userId: user?.id,
     mode,
-    onCreateConversation: createConversation,
+    projectId: currentProjectId,
+    documentIds,
+    onCreateConversation: handleCreateConversation,
     onSaveMessage: saveMessage,
     onDeleteMessage: deleteMessageRow,
+    onRememberFacts: handleRememberFacts,
     initialMessages: loadedMessages,
   });
 
@@ -73,7 +130,7 @@ const ChatContainer = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isStreaming, scrollToBottom]);
+  }, [messages, busy, scrollToBottom]);
 
   // Keep the latest message visible when the mobile keyboard opens/resizes.
   useEffect(() => {
@@ -121,6 +178,23 @@ const ChatContainer = () => {
     [selectConversation, isMobile]
   );
 
+  const handleSelectProject = useCallback(
+    (id: string | null) => {
+      selectProject(id);
+      startNewChat();
+      clearMessages();
+      setLoadedMessages([]);
+    },
+    [selectProject, startNewChat, clearMessages]
+  );
+
+  const handleSend = useCallback(
+    (content: string, options?: SendOptions) => {
+      void sendMessage(content, options ?? {});
+    },
+    [sendMessage]
+  );
+
   /**
    * Editing an earlier message copies everything before it into a new
    * conversation, so the original thread stays intact.
@@ -133,7 +207,7 @@ const ChatContainer = () => {
       const branchId = await createBranch(history, newContent);
       if (!branchId) return;
       setLoadedMessages(history);
-      await sendMessage(newContent, undefined, branchId);
+      await sendMessage(newContent, { conversationIdOverride: branchId });
     },
     [messages, createBranch, sendMessage]
   );
@@ -143,6 +217,9 @@ const ChatContainer = () => {
   };
 
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
+  const headerSubtitle = currentProject
+    ? `${currentProject.name} · ${modeLabel(mode)}`
+    : modeLabel(mode);
 
   return (
     <div className="flex h-full min-h-0 overflow-hidden">
@@ -166,6 +243,11 @@ const ChatContainer = () => {
               onDeleteConversation={deleteConversation}
               onSignOut={handleSignOut}
               userEmail={user?.email}
+              projects={projects}
+              currentProjectId={currentProjectId}
+              onSelectProject={handleSelectProject}
+              onCreateProject={(name) => void createProject(name)}
+              onOpenSettings={() => setSettingsOpen(true)}
             />
           </div>
         </>
@@ -191,7 +273,7 @@ const ChatContainer = () => {
               <h1 className="text-lg font-medium text-foreground truncate leading-tight">
                 AI Assistant
               </h1>
-              <p className="text-xs text-muted-foreground truncate">{modeLabel(mode)}</p>
+              <p className="text-xs text-muted-foreground truncate">{headerSubtitle}</p>
             </div>
           </div>
         </header>
@@ -201,10 +283,10 @@ const ChatContainer = () => {
           ref={messagesContainerRef}
           className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-3 sm:px-4 py-6"
           aria-live="polite"
-          aria-busy={isStreaming}
+          aria-busy={busy}
         >
           {messages.length === 0 ? (
-            <WelcomeScreen onPromptClick={sendMessage} />
+            <WelcomeScreen onPromptClick={(prompt) => handleSend(prompt)} />
           ) : (
             <div className="space-y-6">
               {messages.map((message) => (
@@ -215,12 +297,10 @@ const ChatContainer = () => {
                   createdAt={message.createdAt}
                   onDelete={() => void deleteMessage(message.id)}
                   onRegenerate={
-                    !isStreaming && message.id === lastAssistantId
-                      ? () => void regenerate()
-                      : undefined
+                    !busy && message.id === lastAssistantId ? () => void regenerate() : undefined
                   }
                   onEdit={
-                    message.role === "user" && !isStreaming
+                    message.role === "user" && !busy
                       ? (content) => void handleEditMessage(message.id, content)
                       : undefined
                   }
@@ -228,7 +308,12 @@ const ChatContainer = () => {
               ))}
 
               {isStreaming && <TypingIndicator />}
-              {canRetry && !isStreaming && (
+              {isResearching && (
+                <p className="text-sm text-muted-foreground animate-pulse">
+                  Researching — planning questions, gathering sources and writing an answer…
+                </p>
+              )}
+              {canRetry && !busy && (
                 <div className="flex justify-center">
                   <Button
                     variant="outline"
@@ -252,15 +337,36 @@ const ChatContainer = () => {
         {/* Input Area */}
         <footer className="flex-shrink-0 p-3 sm:p-4 border-t border-border/50 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <ChatInput
-            onSend={sendMessage}
-            disabled={isStreaming || rateLimit.isLimited}
+            onSend={handleSend}
+            disabled={busy || rateLimit.isLimited}
             mode={mode}
             onModeChange={handleModeChange}
             isStreaming={isStreaming}
             onStop={stopGeneration}
+            documents={documents}
+            onAttachDocument={(file) => void addDocument(file)}
+            onRemoveDocument={(id) => void removeDocument(id)}
+            uploadingDocument={uploading}
+            researchAvailable={capabilities.deepResearch}
+            webSearchAvailable={capabilities.webSearch}
           />
         </footer>
       </div>
+
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        settings={settings}
+        memories={memories}
+        onSaveSettings={(patch) => void saveSettings(patch)}
+        onAddMemory={(content) => void addMemory(content)}
+        onDeleteMemory={(id) => void deleteMemory(id)}
+        onClearMemories={() => void clearMemories()}
+        projects={projects}
+        currentProject={currentProject}
+        onUpdateProject={(id, patch) => void updateProject(id, patch)}
+        onDeleteProject={(id) => void deleteProject(id)}
+      />
     </div>
   );
 };
