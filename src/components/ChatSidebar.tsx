@@ -201,6 +201,16 @@ const ChatSidebar = ({
           </div>
           <span className="text-xs text-muted-foreground truncate flex-1">{userEmail}</span>
         </div>
+        {onOpenSettings && (
+          <Button
+            variant="ghost"
+            onClick={onOpenSettings}
+            className="w-full min-h-11 justify-start gap-2 text-muted-foreground hover:text-foreground"
+          >
+            <Settings className="w-4 h-4" />
+            Settings
+          </Button>
+        )}
         <Button
           variant="ghost"
           onClick={onSignOut}
