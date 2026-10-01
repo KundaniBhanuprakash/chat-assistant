@@ -73,7 +73,7 @@ const ChatSidebar = ({
       className="w-[min(16rem,85vw)] h-full min-h-0 flex flex-col bg-sidebar border-r border-sidebar-border pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
       {/* Header */}
-      <div className="p-4 border-b border-sidebar-border">
+      <div className="p-4 border-b border-sidebar-border space-y-3">
         <Button
           onClick={onNewChat}
           className="w-full min-h-11 bg-primary hover:bg-primary/90 gap-2"
@@ -81,6 +81,64 @@ const ChatSidebar = ({
           <Plus className="w-4 h-4" />
           New Chat
         </Button>
+
+        {onSelectProject && (
+          <div className="space-y-2">
+            <Select
+              value={currentProjectId ?? ALL_CHATS}
+              onValueChange={(value) =>
+                onSelectProject(value === ALL_CHATS ? null : value)
+              }
+            >
+              <SelectTrigger className="min-h-11 text-sm" aria-label="Project">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <SelectValue placeholder="All chats" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_CHATS}>All chats</SelectItem>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {onCreateProject &&
+              (creatingProject ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!newProject.trim()) return;
+                    onCreateProject(newProject);
+                    setNewProject("");
+                    setCreatingProject(false);
+                  }}
+                >
+                  <Input
+                    autoFocus
+                    value={newProject}
+                    maxLength={80}
+                    onChange={(e) => setNewProject(e.target.value)}
+                    onBlur={() => !newProject.trim() && setCreatingProject(false)}
+                    placeholder="Project name, then Enter"
+                    aria-label="New project name"
+                    className="min-h-11 text-sm"
+                  />
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCreatingProject(true)}
+                  className="w-full rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
+                >
+                  + New project
+                </button>
+              ))}
+          </div>
+        )}
       </div>
 
       {/* Conversations List */}
