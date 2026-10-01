@@ -1,7 +1,16 @@
 import { useState } from "react";
-import { MessageSquare, Plus, Trash2, LogOut, Loader2 } from "lucide-react";
+import { MessageSquare, Plus, Trash2, LogOut, Loader2, Settings, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { Project } from "@/hooks/useProjects";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,7 +39,14 @@ interface ChatSidebarProps {
   onDeleteConversation: (id: string) => void;
   onSignOut: () => void;
   userEmail?: string;
+  projects?: Project[];
+  currentProjectId?: string | null;
+  onSelectProject?: (id: string | null) => void;
+  onCreateProject?: (name: string) => void;
+  onOpenSettings?: () => void;
 }
+
+const ALL_CHATS = "__all__";
 
 const ChatSidebar = ({
   conversations,
@@ -41,8 +57,15 @@ const ChatSidebar = ({
   onDeleteConversation,
   onSignOut,
   userEmail,
+  projects = [],
+  currentProjectId = null,
+  onSelectProject,
+  onCreateProject,
+  onOpenSettings,
 }: ChatSidebarProps) => {
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
+  const [newProject, setNewProject] = useState("");
+  const [creatingProject, setCreatingProject] = useState(false);
 
   return (
     <nav
