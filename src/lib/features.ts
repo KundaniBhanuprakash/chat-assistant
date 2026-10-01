@@ -12,11 +12,14 @@ export interface Capabilities {
   chat: boolean;
   imageEdit: boolean;
   imageGeneration: boolean;
+  imageUnderstanding: boolean;
   webSearch: boolean;
   deepResearch: boolean;
   voiceInput: boolean;
   voiceOutput: boolean;
   documents: boolean;
+  memory: boolean;
+  projects: boolean;
   codeExecution: boolean;
 }
 
@@ -24,11 +27,14 @@ export const DEFAULT_CAPABILITIES: Capabilities = {
   chat: true,
   imageEdit: true,
   imageGeneration: false,
+  imageUnderstanding: true,
   webSearch: false,
-  deepResearch: false,
+  deepResearch: true,
   voiceInput: false,
   voiceOutput: false,
-  documents: false,
+  documents: true,
+  memory: true,
+  projects: true,
   codeExecution: false,
 };
 
