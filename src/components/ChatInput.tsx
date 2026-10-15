@@ -1,5 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, ImagePlus, X, Square, Paperclip, FileText, Globe, Loader2 } from "lucide-react";
+import {
+  Send,
+  ImagePlus,
+  X,
+  Square,
+  Paperclip,
+  FileText,
+  Globe,
+  Loader2,
+  Mic,
+} from "lucide-react";
+import { recordWav, type Recording } from "@/lib/voice/recordWav";
+import { transcribe } from "@/lib/voice/speech";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -15,6 +27,8 @@ export interface SendOptions {
   image?: File;
   imageIntent?: ImageIntent;
   research?: boolean;
+  /** The message was spoken; the reply will be read aloud. */
+  viaVoice?: boolean;
 }
 
 interface ChatInputProps {

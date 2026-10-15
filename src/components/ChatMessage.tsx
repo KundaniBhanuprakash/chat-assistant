@@ -140,6 +140,8 @@ const ChatMessage = ({
   onDelete,
   onRegenerate,
   onEdit,
+  onSpeak,
+  speaking,
 }: ChatMessageProps) => {
   const isUser = role === "user";
   const [reaction, setReaction] = useState<Reaction>(null);
