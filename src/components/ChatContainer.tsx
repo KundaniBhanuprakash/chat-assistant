@@ -12,6 +12,7 @@ import { useProjects } from "@/hooks/useProjects";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useUserSettings } from "@/hooks/useUserSettings";
 import { useAuth } from "@/hooks/useAuth";
+import { useSpeech } from "@/hooks/useSpeech";
 import { Menu, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -119,6 +120,16 @@ const ChatContainer = () => {
     initialMessages: loadedMessages,
   });
 
+  const { speakingId, play: playSpeech, stop: stopSpeech } = useSpeech();
+  // After a spoken message, read the reply aloud once it has finished.
+  const readNextReplyRef = useRef(false);
+  useEffect(() => {
+    if (busy || !readNextReplyRef.current) return;
+    readNextReplyRef.current = false;
+    const last = messages[messages.length - 1];
+    if (last?.role === "assistant" && last.content.trim()) void playSpeech(last.id, last.content);
+  }, [busy, messages, playSpeech]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLElement>(null);
 
@@ -190,9 +201,11 @@ const ChatContainer = () => {
 
   const handleSend = useCallback(
     (content: string, options?: SendOptions) => {
+      stopSpeech();
+      readNextReplyRef.current = Boolean(options?.viaVoice);
       void sendMessage(content, options ?? {});
     },
-    [sendMessage]
+    [sendMessage, stopSpeech]
   );
 
   /**
@@ -299,6 +312,15 @@ const ChatContainer = () => {
                   onRegenerate={
                     !busy && message.id === lastAssistantId ? () => void regenerate() : undefined
                   }
+                  onSpeak={
+                    message.role === "assistant" && capabilities.voiceOutput
+                      ? () =>
+                          speakingId === message.id
+                            ? stopSpeech()
+                            : void playSpeech(message.id, message.content)
+                      : undefined
+                  }
+                  speaking={speakingId === message.id}
                   onEdit={
                     message.role === "user" && !busy
                       ? (content) => void handleEditMessage(message.id, content)
@@ -349,6 +371,7 @@ const ChatContainer = () => {
             uploadingDocument={uploading}
             researchAvailable={capabilities.deepResearch}
             webSearchAvailable={capabilities.webSearch}
+            voiceAvailable={capabilities.voiceInput}
           />
         </footer>
       </div>

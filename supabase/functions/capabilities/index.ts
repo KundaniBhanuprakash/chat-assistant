@@ -26,8 +26,8 @@ serve((req) => {
     webSearch: has("TAVILY_API_KEY"),
     // Research works over attached documents even without a web provider.
     deepResearch: gateway,
-    voiceInput: false,
-    voiceOutput: false,
+    voiceInput: gateway,
+    voiceOutput: gateway,
     documents: true,
     memory: true,
     projects: true,
