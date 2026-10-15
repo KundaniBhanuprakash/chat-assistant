@@ -34,6 +34,7 @@ export interface SendOptions {
 interface ChatInputProps {
   onSend: (message: string, options?: SendOptions) => void;
   disabled?: boolean;
+  voiceAvailable?: boolean;
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
   isStreaming?: boolean;
@@ -59,7 +60,60 @@ const ChatInput = ({
   uploadingDocument,
   researchAvailable,
   webSearchAvailable,
+  voiceAvailable,
 }: ChatInputProps) => {
+  const [voiceState, setVoiceState] = useState<"idle" | "recording" | "transcribing">("idle");
+  const [level, setLevel] = useState(0);
+  const recordingRef = useRef<Recording | null>(null);
+
+  useEffect(() => {
+    if (voiceState !== "recording") return;
+    const id = window.setInterval(() => setLevel(recordingRef.current?.level() ?? 0), 100);
+    return () => window.clearInterval(id);
+  }, [voiceState]);
+
+  useEffect(() => () => void recordingRef.current?.cancel(), []);
+
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error("Voice input isn't supported in this browser.");
+      return;
+    }
+    try {
+      recordingRef.current = await recordWav();
+      setVoiceState("recording");
+    } catch (error) {
+      const denied = error instanceof DOMException && error.name === "NotAllowedError";
+      toast.error(
+        denied
+          ? "Microphone access was blocked. Allow it in your browser settings to talk."
+          : "Couldn't start the microphone."
+      );
+    }
+  };
+
+  const stopRecording = async (send: boolean) => {
+    const recording = recordingRef.current;
+    recordingRef.current = null;
+    if (!recording) return;
+    if (!send) {
+      await recording.cancel();
+      setVoiceState("idle");
+      return;
+    }
+    setVoiceState("transcribing");
+    try {
+      const file = await recording.stop();
+      const text = await transcribe(file, (soFar) => setInput(soFar));
+      setInput("");
+      onSend(text, { research, viaVoice: true });
+      setResearch(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Voice input failed.");
+    } finally {
+      setVoiceState("idle");
+    }
+  };
   const [input, setInput] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const [imageIntent, setImageIntent] = useState<ImageIntent>("ask");
@@ -277,6 +331,52 @@ const ChatInput = ({
             className="min-h-[52px] max-h-[160px] resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-base sm:text-sm placeholder:text-muted-foreground/60"
             rows={1}
           />
+          {voiceAvailable && !isStreaming && !image && (
+            voiceState === "recording" ? (
+              <>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => void stopRecording(false)}
+                  aria-label="Cancel recording"
+                  className="h-11 w-11 rounded-xl text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={() => void stopRecording(true)}
+                  aria-label="Stop recording and send"
+                  className="relative h-11 w-11 rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-0 rounded-xl ring-2 ring-destructive/60 transition-transform"
+                    style={{ transform: `scale(${1 + level * 0.35})` }}
+                  />
+                  <Square className="w-4 h-4 fill-current" />
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={() => void startRecording()}
+                disabled={disabled || voiceState === "transcribing"}
+                aria-label="Speak your message"
+                className="h-11 w-11 rounded-xl text-muted-foreground hover:text-foreground"
+              >
+                {voiceState === "transcribing" ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Mic className="w-5 h-5" />
+                )}
+              </Button>
+            )
+          )}
           {isStreaming && onStop ? (
             <Button
               type="button"
