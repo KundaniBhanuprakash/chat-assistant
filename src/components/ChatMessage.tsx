@@ -10,6 +10,8 @@ import {
   RefreshCw,
   Pencil,
   X,
+  Volume2,
+  Square,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
@@ -25,6 +27,8 @@ interface ChatMessageProps {
   onDelete?: () => void;
   onRegenerate?: () => void;
   onEdit?: (newContent: string) => void;
+  onSpeak?: () => void;
+  speaking?: boolean;
 }
 
 type Reaction = "up" | "down" | null;
@@ -260,6 +264,25 @@ const ChatMessage = ({
                 >
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
+                {onSpeak && (
+                  <button
+                    onClick={onSpeak}
+                    aria-pressed={speaking}
+                    className={cn(
+                      iconButton,
+                      speaking
+                        ? "bg-primary/20 text-primary"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    )}
+                    aria-label={speaking ? "Stop reading aloud" : "Read aloud"}
+                  >
+                    {speaking ? (
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                    ) : (
+                      <Volume2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
                 {onRegenerate && (
                   <button
                     onClick={onRegenerate}
